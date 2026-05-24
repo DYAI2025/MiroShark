@@ -18,7 +18,7 @@ openai>=1.0.0
 neo4j>=5.15.0
 
 # ============= HTTP Requests =============
-# For Ollama embedding API
+# For Ollama embedding API and smoke test script
 requests>=2.31.0
 
 # ============= Wonderwall Social Media Simulation (Wonderwall fork) =============

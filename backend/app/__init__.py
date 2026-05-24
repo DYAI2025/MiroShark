@@ -72,6 +72,38 @@ def create_app(config_class=Config):
         if request.content_type and 'json' in request.content_type:
             logger.debug(f"Request body: {request.get_json(silent=True)}")
     
+    # Internal API authentication guard
+    @app.before_request
+    def internal_auth_guard():
+        """Protect expensive API routes with internal key authentication"""
+        # Exempt health check endpoint
+        if request.path == '/health':
+            return
+        
+        # Exempt OpenAPI docs (optional - keeps API surface discoverable)
+        if request.path in ['/api/openapi.json', '/api/openapi.yaml', '/api/docs']:
+            return
+        
+        # Only protect /api/* routes
+        if not request.path.startswith('/api/'):
+            return
+        
+        # Get internal key from environment
+        internal_key = os.environ.get('MIROSHARK_INTERNAL_KEY')
+        
+        # If internal key is set, enforce authentication
+        if internal_key:
+            provided_key = request.headers.get('x-miroshark-internal-key')
+            if not provided_key or provided_key != internal_key:
+                logger.warning(f"Unauthorized API access attempt: {request.method} {request.path}")
+                return {'error': 'Unauthorized - Invalid or missing internal key'}, 401
+        else:
+            # Fail-closed in production/staging when key is not set
+            # In debug mode, allow without key for development convenience
+            if not Config.DEBUG:
+                logger.error(f"Protected API access attempted without MIROSHARK_INTERNAL_KEY configured: {request.method} {request.path}")
+                return {'error': 'Service not configured - missing internal key'}, 503
+    
     @app.after_request
     def log_response(response):
         logger = get_logger('miroshark.request')
