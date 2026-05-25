@@ -206,6 +206,18 @@ The EmbedDialog surfaces a `🟣 Farcaster Frame` section: a lazy-loaded preview
 - **Frame meta tags:** `fc:frame`, `fc:frame:image`, `fc:frame:image:aspect_ratio`, `fc:frame:button:1`, `fc:frame:button:1:action`, `fc:frame:button:1:target` — emitted by `GET /share/<id>` for published sims, silently absent for private sims.
 - **Endpoint:** `GET /api/simulation/<id>/frame-metadata` → `{frame_version, image_url, image_aspect_ratio, share_url, buttons, has_trajectory, sim_title}`. Same publish gate as the chart SVG — 403 on unpublished sims, 200 with the share-card fallback for sims with no trajectory yet.
 
+## oEmbed Auto-Unfurl (Notion / Ghost / Substack / WordPress)
+
+The writing-platform distribution surface. Open Graph and Twitter tags cover the social platforms; Farcaster Frame v2 covers Warpcast. But the platforms where researchers and analysts actually *publish* — Notion, Ghost, Substack, WordPress — don't render from Open Graph alone; they implement the [oEmbed 1.0 spec](https://oembed.com) and look for a discovery `<link>` tag, then call back to the provider for a structured embed payload. Without it, a MiroShark link pasted into a Notion page or a Substack draft renders as a bare URL.
+
+`GET /oembed?url=<share-url>` is that provider. The share-page `<head>` now emits two discovery tags for published sims — `<link rel="alternate" type="application/json+oembed">` and the `text/xml+oembed` variant (some consumers, Notion among them, probe for the XML link) — both pointing at the root-mounted `/oembed` endpoint. A consumer that finds the tag calls back with the share URL and receives a `type: "rich"` payload: the 1200×630 share-card PNG as `thumbnail_url` and an 800×500 iframe over the existing `/embed/<id>` SPA route as `html`. Every organic citation becomes a rich preview card with no user action.
+
+oEmbed adds a *protocol*, not a renderer — the thumbnail and iframe both point at surfaces that already ship. Pure stdlib on the backend (`re` + `urllib.parse` + `xml.etree.ElementTree` in `app/services/oembed_service.py`), zero new dependencies. The endpoint never dereferences the inbound URL; it only extracts a sim id from a path on a host this deployment owns, so a foreign-domain `url` returns `404` and the surface can't be aimed at another site. Private and missing sims also return `404` (indistinguishable from each other), so the endpoint never confirms a private sim exists — the same gating posture as the OG / Frame tags.
+
+- **Endpoint:** `GET /oembed?url=<share-url>&format=<json|xml>` → oEmbed `rich` payload. `format` defaults to `json`; an unsupported format returns `501` per the spec. Mounted at the root (no `/api` prefix). Honors `X-Forwarded-Proto` / `X-Forwarded-Host`.
+- **Discovery tags:** `GET /share/<id>` emits `application/json+oembed` + `text/xml+oembed` `<link>` tags for published sims, silently absent for private sims.
+- **Counter:** the `oembed` key joins the surface-stats schema so an operator can see how many third-party unfurls the endpoint drove.
+
 ## Trajectory Chart SVG
 
 The scalable-vector companion to the trajectory CSV / JSONL data export. Where the CSV gives Pandas / Excel / Tableau / R the raw numbers, `GET /api/simulation/<id>/chart.svg` gives every other platform a ready-made image of the belief journey — bullish (`#22c55e`), neutral (`#6b7280`), bearish (`#ef4444`) polylines plotted against round number on a fixed `viewBox="0 0 800 400"`, with a 5-line y-axis grid, round-number x-axis labels, a three-swatch legend, and the scenario title.
@@ -312,6 +324,50 @@ Same publish gate as every other share surface (`is_public=true`). `Cache-Contro
 The Embed dialog exposes a `🏷️ Status badge (SVG)` section: a live in-place preview, a copyable badge URL, a `![MiroShark Belief Badge](...)` Markdown snippet, and an `<img height="20">` HTML snippet. The `badge_svg` counter joins the surface-stats schema so an operator can see how many README / blog / Notion embeds drive views back to the share page.
 
 Turns every distributed share URL into a *pull point* for new visitors who see the badge in a researcher's README — the first share surface that brings the simulation *to* the reader, instead of waiting for the reader to navigate to the share page.
+
+## Platform Aggregate Statistics
+
+The first endpoint that describes the platform itself rather than one simulation. `GET /api/stats` collapses every simulation on disk that satisfies `is_public == true` AND `status == "completed"` into a single envelope: a total sim count, a consensus distribution (bullish / neutral / bearish counts + percentages), an average `confidence_pct` across the corpus, a sum of every `surface-stats.json` counter on disk, the count of unique `project_id`s the simulations span, and the newest-sim identifier + created-at timestamp. One read powers press kits ("MiroShark has run N simulations"), external dashboards, LLM-agent health checks (*"is this MiroShark instance active?"*), and the platform Shields.io badge below.
+
+```json
+{
+  "success": true,
+  "data": {
+    "schema_version": "1",
+    "total_sims": 1247,
+    "consensus_distribution": {
+      "bullish": 612, "neutral": 308, "bearish": 327,
+      "bullish_pct": 49.1, "neutral_pct": 24.7, "bearish_pct": 26.2
+    },
+    "avg_confidence_pct": 58.4,
+    "total_surface_views": 41682,
+    "unique_projects": 89,
+    "newest_sim_id": "sim_e7c1b2f3a9d4",
+    "newest_sim_created_at": "2026-05-24T15:42:11.103928"
+  }
+}
+```
+
+- **Stance counts inherit the per-sim derivation.** The same plurality + tie-break rules (`bullish > bearish > neutral`) that turn a sim's final belief split into a `direction` on the per-sim `signal.json` produce the platform-level counts here. A simulation labelled Bullish on its `signal.json` is counted in the `bullish` bucket on this aggregate — two surfaces, one source of truth.
+- **`unique_projects`, not `unique_operators`.** `SimulationState` carries no operator / created-by field — `project_id` is the closest stable identifier. Each project is conventionally a single research / operator workspace, so the project count is a reasonable proxy for the operator count, but the field name doesn't promise data the model can't back. A future model migration can add a dedicated `operator` field and a sibling `unique_operators` aggregate without breaking this surface.
+- **One-scan, 60-second cache.** A module-level cache keyed on the simulation root absorbs bursty press unfurls — every call after the first inside the 60-second window is a dict copy, not a disk scan. The route additionally emits a short `ETag` derived from `total_sims` + `newest_sim_id`; an `If-None-Match` conditional GET short-circuits to `304 Not Modified` without re-serialising the body, so a README badge polling every minute pays roughly the cost of one HEAD request per window.
+- **Empty deployments degrade cleanly.** A fresh install with zero published simulations returns a fully-zeroed envelope, not a 404. A consumer rendering "*N simulations run*" doesn't need to special-case the first day of deployment.
+
+Pure stdlib (`os` + `json` + `time` + `threading`, ~340 LoC in `app/services/platform_stats.py`); zero new dependencies — same posture as `signal_service`, `badge_service`, and every other aggregate module. The scan walks `WONDERWALL_SIMULATION_DATA_DIR` directly; no Neo4j, no LLM, no outbound network.
+
+## Platform Stats Badge SVG
+
+The platform-level sibling of the per-sim `/badge.svg`. `GET /api/stats/badge.svg` returns a flat 20-pixel Shields.io-compatible pill — `MiroShark` on the standard Shields.io grey (`#555555`), `N simulations` on platform-blue (`#0ea5e9`). One line of Markdown turns any community README, Substack header, or operator portfolio into a live platform-activity indicator:
+
+```markdown
+![MiroShark](https://your-host/api/stats/badge.svg)
+```
+
+The count is the same `total_sims` value `/api/stats` reports — the two surfaces share the same scan and the same 60-second cache. Platform-blue is visually distinct from the three per-sim stance colours (`#22c55e` / `#6b7280` / `#ef4444`) so a reader never mistakes the platform badge for a per-sim consensus badge — sim badges sit on the right edge of "this specific run was bullish"; platform badges sit on the left edge of "this whole project is active".
+
+A zero-sim deployment renders a valid `MiroShark | 0 simulations` pill rather than a 404 — an embedded `<img>` on a freshly-installed instance never broken-image-glyphs. Same flat layout, accessibility attributes (`role="img"`, `aria-label="MiroShark: N simulations"`, `<title>` element), and rounded `<clipPath>` pill ends as the per-sim badge; the only differences are the right-half label and fill colour. Bytewise-deterministic across calls with the same input count — a future ETag layer can hash the response bytes directly.
+
+A second-order distribution amplifier: per-sim badges (PR #94) are pull points for *specific simulations*; the platform badge is a pull point for *MiroShark itself*. Every operator running an Aeon framework instance, every researcher with a personal site, every Substack post about swarm simulations becomes a live signal that the platform is active and growing.
 
 ## BibTeX Academic Citation
 

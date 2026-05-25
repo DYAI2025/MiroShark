@@ -104,11 +104,14 @@ Base URL is `http://localhost:5001` in dev. Every endpoint returns JSON unless o
 | `GET` | `/api/simulation/<id>/lineage` | Lineage graph slice — parent the sim was forked / branched from + every public child whose `parent_simulation_id` points back at it. Closes the navigation gap the reproduction config left open |
 | `GET` | `/api/simulation/<id>/webhook-log` | Recent outbound-webhook delivery attempts (last 10 + total count). Admin-token gated |
 | `POST` | `/api/simulation/<id>/webhook-retry` | Re-fire the completion webhook for a finished sim. Admin-token gated |
-| `GET` | `/share/<id>` | Public OG-tag landing page (auto-redirects to SPA) |
+| `GET` | `/share/<id>` | Public OG-tag landing page (auto-redirects to SPA). Also emits `application/json+oembed` + `text/xml+oembed` discovery `<link>` tags for published sims |
+| `GET` | `/oembed?url=<share-url>&format=<json\|xml>` | oEmbed 1.0 provider — auto-unfurls a pasted `/share/<id>` link into a `type: "rich"` card (share-card thumbnail + `/embed/<id>` iframe) on Notion, Ghost, Substack, WordPress, and other oEmbed consumers. `format` defaults to `json`; unsupported format → `501`. Foreign-domain / unpublished / missing URL → `404`. Honors `X-Forwarded-*` |
 | `GET` | `/watch/<id>` | Live spectator-watch page — minimal full-viewport broadcast view, polls every 15 s, OG / Twitter-card unfurl |
 | `GET` | `/sitemap.xml` | Auto-generated sitemap (sitemaps.org 0.9) listing every public sim's `/share/<id>` + `/watch/<id>` URLs. `404` when `ENABLE_SITEMAP=false`. Cached 1 h |
 | `GET` | `/robots.txt` | Crawler directives — `Disallow: /api/`, `Allow: /share/` etc., advertises `Sitemap:` when enabled. Cached 1 h |
 | `GET` | `/api/config/sitemap` | Public flag `{enabled, sitemap_url}` exposed to the SPA so EmbedDialog renders the right indexing hint |
+| `GET` | `/api/stats` | Platform-level aggregate stats — `total_sims` (public + completed), `consensus_distribution` (bullish/neutral/bearish counts + pcts via the same plurality rules `signal.json` uses), `avg_confidence_pct`, `total_surface_views` (sum across every sim's `surface-stats.json`), `unique_projects`, `newest_sim_id` + `newest_sim_created_at`. ETag derived from `total_sims` + `newest_sim_id` so `If-None-Match` short-circuits to `304`. Cached 60 s |
+| `GET` | `/api/stats/badge.svg` | Flat Shields.io-compatible platform badge — `MiroShark` left half (`#555555`), `N simulations` right half (platform-blue `#0ea5e9`). Sibling of the per-sim `badge.svg` — embed in any community README, Substack, or operator portfolio to advertise live platform activity. Always returns `200` (a zero-sim deployment renders `MiroShark | 0 simulations`). Cached 60 s |
 | `POST` | `/api/simulation/<id>/article` | Generate a Substack-style write-up |
 | `GET` | `/api/simulation/<id>/export` | Full JSON export |
 | `GET` | `/api/simulation/list` | List simulations |
@@ -187,6 +190,22 @@ if sig["confidence_tier"] in ("confident", "high-conviction") and sig["risk_tier
 ```
 
 Stricter publish gate than `signal.json`: only sims with `status == "completed"` emit a payload. A 404 means the simulation is still running or has no recorded rounds — a bot should treat it as "not ready" and skip, not retry. The `confidence_tier` field is the four-bucket discrete scale (`speculative` / `moderate` / `confident` / `high-conviction`) bots use for position-sizing logic; the underlying `confidence_pct` is also returned for callers that want the continuous value. `yes_probability + no_probability == 1.0` within float tolerance — the invariant a Polymarket order-book consumer expects.
+
+### oEmbed auto-unfurl
+
+Most oEmbed consumers (Notion, Ghost, Substack, WordPress) discover the endpoint automatically from the `<link rel="alternate" type="application/json+oembed">` tag on the `/share/<id>` page — paste the share link and the rich card appears with no further setup. To query the provider directly:
+
+```bash
+curl -s "https://your-host/oembed?url=https://your-host/share/<id>" \
+  | jq '{type, title, thumbnail_url, html}'
+```
+
+```bash
+# XML representation (some consumers, Notion among them, probe the text/xml+oembed link)
+curl -s "https://your-host/oembed?url=https://your-host/share/<id>&format=xml"
+```
+
+Returns a `type: "rich"` payload — `thumbnail_url` is the 1200×630 share-card PNG and `html` is an 800×500 iframe over `/embed/<id>`. The `url` must be a share link on this deployment's own host; a foreign domain, an unpublished sim, or a missing sim all return `404`. An unsupported `format` returns `501` per the oEmbed spec.
 
 ### Search Engine Discoverability
 
