@@ -29,8 +29,7 @@ gcloud run deploy "${SERVICE}" \
   --timeout=300 \
   --concurrency=10 \
   --no-allow-unauthenticated \
-  --env-vars-file=cloudrun.env.yaml \
-  --health-check-http-target-path=/health
+  --env-vars-file=cloudrun.env.yaml
 
 echo "==> Done. Service URL:"
 gcloud run services describe "${SERVICE}" \

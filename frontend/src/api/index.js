@@ -14,8 +14,12 @@ const service = axios.create({
 // localise template metadata, error messages, and feed copy.
 service.interceptors.request.use(
   config => {
+    config.headers = config.headers || {}
+    const internalKey = import.meta.env.VITE_INTERNAL_KEY
+    if (internalKey) {
+      config.headers['x-miroshark-internal-key'] = internalKey
+    }
     if (locale && locale.value) {
-      config.headers = config.headers || {}
       config.headers['X-MiroShark-Locale'] = locale.value
       config.headers['Accept-Language'] = locale.value
     }
