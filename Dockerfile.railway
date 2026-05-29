@@ -8,8 +8,8 @@ WORKDIR /app
 # Copy Python dependency descriptor files first to leverage Docker cache
 COPY backend/pyproject.toml backend/uv.lock ./backend/
 
-# Install Python dependencies into system Python (required — CMD uses system `python`)
-RUN cd backend && uv sync --frozen --system
+# Install Python dependencies
+RUN cd backend && uv sync --frozen
 
 # Copy backend source code
 COPY backend ./backend
@@ -18,4 +18,4 @@ COPY backend ./backend
 EXPOSE 5001
 
 # Start backend only (production mode)
-CMD ["python", "backend/run.py"]
+CMD ["/app/backend/.venv/bin/python", "backend/run.py"]
