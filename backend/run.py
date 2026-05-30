@@ -37,8 +37,9 @@ def main():
     app = create_app()
     
     # Get runtime configuration
+    # Prefer Railway-injected PORT, fallback to FLASK_PORT, then default 5001
     host = os.environ.get('FLASK_HOST', '0.0.0.0')
-    port = int(os.environ.get('FLASK_PORT', 5001))
+    port = int(os.environ.get('PORT', os.environ.get('FLASK_PORT', 5001)))
     debug = Config.DEBUG
     
     # Start server

@@ -1,0 +1,21 @@
+FROM python:3.11
+
+# Copy uv from the official uv image
+COPY --from=ghcr.io/astral-sh/uv:0.9.26 /uv /uvx /bin/
+
+WORKDIR /app
+
+# Copy Python dependency descriptor files first to leverage Docker cache
+COPY backend/pyproject.toml backend/uv.lock ./backend/
+
+# Install Python dependencies
+RUN cd backend && uv sync --frozen
+
+# Copy backend source code
+COPY backend ./backend
+
+# Expose the backend port (Railway will inject PORT env var)
+EXPOSE 5001
+
+# Start backend only (production mode)
+CMD ["/app/backend/.venv/bin/python", "backend/run.py"]

@@ -1,0 +1,22 @@
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - build
+      - -f
+      - Dockerfile.frontend
+      - --build-arg
+      - VITE_API_BASE_URL=$_VITE_API_BASE_URL
+      - --build-arg
+      - VITE_INTERNAL_KEY=$_VITE_INTERNAL_KEY
+      - -t
+      - '$_IMAGE'
+      - frontend
+    timeout: 600s
+
+images:
+  - '$_IMAGE'
+
+timeout: 900s
+
+options:
+  machineType: E2_HIGHCPU_8

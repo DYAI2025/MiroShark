@@ -1,0 +1,11 @@
+{
+  "mode": "current_pattern_field",
+  "horizon": "now",
+  "branchCountMin": 3,
+  "branchCountMax": 7,
+  "sourceMode": "hypotheses_only",
+  "language": "de",
+  "allowQuiz": false,
+  "allowExternalEventPrediction": false,
+  "allowDiagnosis": false
+}
