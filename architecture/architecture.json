@@ -1,0 +1,531 @@
+{
+  "project": {
+    "name": "MiroShark S2S",
+    "domain": "agent",
+    "repo": "miroShark/MiroShark",
+    "timestamp": "2026-05-29T00:00:00Z",
+    "description": "Current MiroShark architecture (Vue SPA + Flask + Neo4j + Wonderwall multi-agent sim) plus the planned Service-to-Service (S2S) interface layer that lets the Pattern-Amp / Bazodiac product drive MiroShark as a scenario-simulation service. Nodes/edges with status 'planned' mark interfaces still to be designed and implemented.",
+    "healthCheckUrl": ""
+  },
+  "nodes": [
+    {
+      "id": "pattern-amp-ui",
+      "x": 140, "y": 130, "type": "ui", "icon": "◑", "label": "Pattern Amp UI", "sub": "external · Bazodiac frontend",
+      "detail": {
+        "title": "Pattern Amp UI",
+        "subtitle": "external presentation · branch visualization",
+        "tags": ["external", "frontend", "pattern-amp"],
+        "flow": [
+          "User opens Pattern Amp and triggers 'Run Scenario' (manual / eve_hypotheses_change / daily_06)",
+          "Polls run status, then renders ScenarioBranchV1[] as branch-fan / pattern field",
+          "Shows confidence, source weights, coherence/tension delta, notToInfer, reflective questions, provenance"
+        ],
+        "apis": [],
+        "schemas": ["ScenarioBranchV1[] (consumed)"],
+        "notes": "Shows possibility directions, never raw data or deterministic 'fate' answers.",
+        "constraints": ["No raw Supabase data exposed to UI", "No deterministic prediction language"],
+        "risks": ["Misreading branches as predictions"]
+      }
+    },
+    {
+      "id": "bazodiac-backend",
+      "x": 140, "y": 360, "type": "external", "icon": "⛁", "label": "Bazodiac Backend", "sub": "external · S2S caller",
+      "detail": {
+        "title": "Bazodiac / Pattern-Amp Backend",
+        "subtitle": "external orchestrator · owns the scenario pipeline",
+        "tags": ["external", "service", "pattern-amp", "owner"],
+        "flow": [
+          "Receives trigger with trigger_key (dedupe)",
+          "Loads required + recommended tables from Supabase (server-side, with service key)",
+          "Builds Source Bundle -> UserPatternStateV1 -> ScenarioSeed.md",
+          "Appends invariant Generic Scenario Prompt + Simulation Config",
+          "Calls MiroShark over S2S, polls, then normalizes output to ScenarioBranchV1[]"
+        ],
+        "apis": [],
+        "schemas": ["SourceBundle", "UserPatternStateV1", "ScenarioSeedV1 (md+json)", "SimulationConfig", "TriggerSource"],
+        "notes": "Holds Supabase service keys. MiroShark must NEVER receive raw tables, service keys, or full raw transcripts.",
+        "constraints": [
+          "Send to MiroShark ONLY: ScenarioSeed.md + Generic Scenario Prompt + Simulation Config",
+          "Strip secrets and irrelevant fields before crossing the S2S boundary"
+        ],
+        "risks": ["Leaking PII / service keys across the boundary", "Duplicate runs without trigger_key dedupe"]
+      }
+    },
+    {
+      "id": "supabase",
+      "x": 140, "y": 600, "type": "data", "icon": "▤", "label": "Supabase", "sub": "external · source tables",
+      "detail": {
+        "title": "Supabase (Pattern-Amp data)",
+        "subtitle": "external data store · per-user source tables",
+        "tags": ["external", "data", "postgres"],
+        "flow": [
+          "P0: profiles, astro_profiles, natal_charts, eve_hypotheses, eve_anchors, daily_pulses, daily_interpretations",
+          "P1: eve_hypothesis_events, eve_sessions, agent_conversations, daily_horoscope_cache, space_weather_cache, cosmic_weather_snapshots",
+          "P2: user_signature_state, weekly_insights_cache, vibes_cache, user_reports"
+        ],
+        "apis": [],
+        "schemas": ["3 contexts: User Base Context, Pattern Context (7 Eve hypotheses), Temporal Context"],
+        "notes": "eve_hypotheses is the primary V1 source (patterns, confidence, triggers, exceptions, counter-evidence, subpatterns, protective function).",
+        "constraints": ["Accessed only by Bazodiac backend, never by MiroShark directly"],
+        "risks": ["Stale weather caches must be down-weighted"]
+      }
+    },
+    {
+      "id": "scenario-tables",
+      "x": 140, "y": 835, "type": "data", "icon": "▦", "label": "scenario_* tables", "sub": "planned · persistence",
+      "detail": {
+        "title": "Scenario persistence tables (MISSING)",
+        "subtitle": "planned data · run lifecycle persistence",
+        "tags": ["data", "planned", "supabase"],
+        "flow": [
+          "scenario_pattern_states - condensed UserPatternState",
+          "scenario_seed_documents - exact seed sent to MiroShark",
+          "scenario_runs - status: queued|running|completed|failed",
+          "scenario_branches - normalized ScenarioBranchV1[]",
+          "scenario_agent_votes - optional per-agent/perspective scores",
+          "scenario_run_events - orchestration debug log",
+          "scenario_trigger_events - dedupe for hypotheses-change & daily triggers"
+        ],
+        "apis": [],
+        "schemas": [],
+        "notes": "Not yet present in Supabase per last DB query. Required for polling, debugging and repeatable runs.",
+        "constraints": ["Must exist before clean app logic (polling/retry) is possible"],
+        "risks": ["Without these, only manual one-off MiroShark feeding is possible"]
+      }
+    },
+
+    {
+      "id": "scenario-orchestrator",
+      "x": 430, "y": 300, "type": "service", "icon": "⚙", "label": "Scenario Orchestrator", "sub": "planned · pipeline + normalizer",
+      "detail": {
+        "title": "Scenario Orchestrator (Bazodiac side)",
+        "subtitle": "planned service · seed builder + result normalizer",
+        "tags": ["service", "planned", "s2s", "pipeline"],
+        "flow": [
+          "Source Bundle (no secrets) -> UserPatternStateV1 (fachliche Verdichtung)",
+          "Render ScenarioSeed.md from template (markdown is the MiroShark input)",
+          "Attach invariant Generic Scenario Prompt + Simulation Config + Trigger Source + Data Completeness",
+          "Submit to MiroShark, poll status, collect raw output",
+          "Result Normalizer -> ScenarioBranchV1[] (requireNotToInfer, requireConfidence, ignoreQuizWeight)"
+        ],
+        "apis": [],
+        "schemas": ["UserPatternStateV1", "ScenarioSeedV1", "NormalizerConfig", "ScenarioBranchV1[]"],
+        "notes": "DECISION POINT: lives as a Bazodiac module calling MiroShark over HTTP. Seed = WHAT to simulate; Generic Prompt = HOW; Config = mode/horizon.",
+        "constraints": [
+          "MiroShark receives only Seed.md + Generic Prompt + Config",
+          "quiz weight must be 0/absent in V1",
+          "no external-event prediction, no diagnosis"
+        ],
+        "risks": ["MiroShark output may not be directly renderable -> normalizer is mandatory"]
+      }
+    },
+    {
+      "id": "miroshark-scenario-api",
+      "x": 430, "y": 575, "type": "api", "icon": "◆", "label": "/api/scenario", "sub": "planned · S2S facade",
+      "detail": {
+        "title": "MiroShark Scenario API (proposed S2S facade)",
+        "subtitle": "planned api · stable contract for Pattern-Amp",
+        "tags": ["api", "planned", "s2s", "facade"],
+        "flow": [
+          "Accept seed + generic prompt + config in one call",
+          "Internally drive prepare -> start -> run-status -> report via SimulationManager",
+          "Expose run lifecycle + normalized branches for polling"
+        ],
+        "apis": [
+          {"method": "POST", "path": "/api/scenario/run", "desc": "Submit ScenarioSeed.md + generic prompt + simulation config; returns runId. Idempotent on trigger_key.", "params": ["seedMarkdown: string", "genericPrompt: string", "simulationConfig: object", "triggerSource: object", "triggerKey: string"], "auth": "service", "status": "planned"},
+          {"method": "GET", "path": "/api/scenario/run/:runId", "desc": "Run status: queued|running|completed|failed (+ MiroShark simulation_id mapping).", "params": ["runId: string"], "auth": "service", "status": "planned"},
+          {"method": "GET", "path": "/api/scenario/run/:runId/branches", "desc": "Normalized ScenarioBranchV1[] once completed.", "params": ["runId: string"], "auth": "service", "status": "planned"}
+        ],
+        "schemas": ["ScenarioRunRequest", "ScenarioRunStatus", "ScenarioBranchV1[]"],
+        "notes": "Alternative to making Bazodiac orchestrate raw /api/simulation/* + /api/report/* directly. Wraps them behind one S2S contract.",
+        "constraints": ["Auth via x-miroshark-internal-key (service tier)", "Stateless contract; map runId -> simulation_id internally"],
+        "risks": ["If skipped, every consumer must re-implement the prepare/start/poll/report dance"]
+      }
+    },
+
+    {
+      "id": "frontend-spa",
+      "x": 740, "y": 120, "type": "ui", "icon": "◧", "label": "MiroShark SPA", "sub": "Vue 3 · :3000",
+      "detail": {
+        "title": "MiroShark Frontend (Vue 3 + Vite)",
+        "subtitle": "ui · existing operator/spectator app",
+        "tags": ["frontend", "vue", "spa"],
+        "flow": [
+          "Home -> Process(:projectId) -> Simulation -> SimulationRun -> Report",
+          "Interaction / Replay / Compare / Embed / Explore / Verified views"
+        ],
+        "apis": [],
+        "schemas": [],
+        "notes": "Talks to backend via /api/*. Not on the S2S path - Pattern-Amp uses its own UI.",
+        "constraints": [],
+        "risks": []
+      }
+    },
+    {
+      "id": "api-simulation",
+      "x": 740, "y": 300, "type": "api", "icon": "▶", "label": "/api/simulation", "sub": "active · sim lifecycle",
+      "detail": {
+        "title": "Simulation API",
+        "subtitle": "api · create/prepare/start/stop/status",
+        "tags": ["api", "backend", "core"],
+        "flow": ["Primary entry an S2S caller would use TODAY (no /api/scenario yet)"],
+        "apis": [
+          {"method": "POST", "path": "/api/simulation/create", "desc": "Create a simulation from a project.", "params": ["project_id"], "auth": "service", "status": "active"},
+          {"method": "POST", "path": "/api/simulation/prepare", "desc": "Generate config + agent profiles for a run.", "params": ["simulation_id"], "auth": "service", "status": "active"},
+          {"method": "POST", "path": "/api/simulation/start", "desc": "Spawn simulation subprocess.", "params": ["simulation_id"], "auth": "service", "status": "active"},
+          {"method": "POST", "path": "/api/simulation/stop", "desc": "Stop a running simulation.", "params": ["simulation_id"], "auth": "service", "status": "active"},
+          {"method": "GET", "path": "/api/simulation/:simulation_id/run-status", "desc": "Poll live run status.", "params": ["simulation_id"], "auth": "service", "status": "active"},
+          {"method": "POST", "path": "/api/simulation/suggest-scenarios", "desc": "LLM scenario suggestions from a prompt.", "params": ["text"], "auth": "service", "status": "active"}
+        ],
+        "schemas": [],
+        "notes": "Backed by backend/app/api/simulation.py (large). Routes verified from source.",
+        "constraints": ["/api/* needs x-miroshark-internal-key when MIROSHARK_INTERNAL_KEY set; relaxed in DEBUG"],
+        "risks": ["No single-call scenario contract today -> orchestration burden on caller"]
+      }
+    },
+    {
+      "id": "api-report",
+      "x": 740, "y": 470, "type": "api", "icon": "▤", "label": "/api/report", "sub": "active · reports",
+      "detail": {
+        "title": "Report API",
+        "subtitle": "api · report generation + retrieval",
+        "tags": ["api", "backend"],
+        "flow": ["S2S caller fetches the final structured report after a run"],
+        "apis": [
+          {"method": "POST", "path": "/api/report/generate", "desc": "Generate final report for a simulation.", "params": ["simulation_id"], "auth": "service", "status": "active"},
+          {"method": "GET", "path": "/api/report/by-simulation/:simulation_id", "desc": "Get report for a simulation.", "params": ["simulation_id"], "auth": "service", "status": "active"},
+          {"method": "GET", "path": "/api/report/:report_id", "desc": "Get a report by id.", "params": ["report_id"], "auth": "service", "status": "active"},
+          {"method": "POST", "path": "/api/report/chat", "desc": "Chat over a generated report.", "params": ["report_id", "message"], "auth": "service", "status": "active"}
+        ],
+        "schemas": ["Report (markdown + sections + citations)"],
+        "notes": "Backed by backend/app/api/report.py + services/report_agent.py.",
+        "constraints": [],
+        "risks": ["Report format != ScenarioBranchV1 -> normalizer needed on Bazodiac side"]
+      }
+    },
+    {
+      "id": "api-graph",
+      "x": 740, "y": 620, "type": "api", "icon": "❖", "label": "/api/graph", "sub": "active · graph + ontology",
+      "detail": {
+        "title": "Graph API",
+        "subtitle": "api · project graph + ontology build",
+        "tags": ["api", "backend", "graph"],
+        "flow": ["Build the knowledge graph that grounds a simulation"],
+        "apis": [
+          {"method": "POST", "path": "/api/graph/build", "desc": "Build graph for a project.", "params": ["project_id"], "auth": "service", "status": "active"},
+          {"method": "POST", "path": "/api/graph/ontology/generate", "desc": "Generate ontology from sources.", "params": ["project_id"], "auth": "service", "status": "active"},
+          {"method": "POST", "path": "/api/graph/fetch-url", "desc": "Fetch + enrich a source URL.", "params": ["url"], "auth": "service", "status": "active"},
+          {"method": "GET", "path": "/api/graph/data/:graph_id", "desc": "Read graph data.", "params": ["graph_id"], "auth": "service", "status": "active"}
+        ],
+        "schemas": [],
+        "notes": "Backed by backend/app/api/graph.py + storage/neo4j_storage.py.",
+        "constraints": [],
+        "risks": []
+      }
+    },
+    {
+      "id": "api-mcp",
+      "x": 740, "y": 765, "type": "api", "icon": "⧉", "label": "/api/mcp", "sub": "active · MCP bridge",
+      "detail": {
+        "title": "MCP API",
+        "subtitle": "api · MCP server bridge + tool catalog",
+        "tags": ["api", "backend", "mcp"],
+        "flow": ["Exposes graph/report tools to external MCP clients (list_graphs, search_graph, browse_clusters, list_reports, get_reasoning_trace ...)"],
+        "apis": [
+          {"method": "GET", "path": "/api/mcp/status", "desc": "MCP bridge status + tool catalog + config snippets.", "params": [], "auth": "service", "status": "active"}
+        ],
+        "schemas": ["MCP tool catalog (parsed from mcp_server.py)"],
+        "notes": "Possible alternate S2S surface: Pattern-Amp could consume MiroShark via MCP instead of REST.",
+        "constraints": [],
+        "risks": []
+      }
+    },
+    {
+      "id": "api-misc",
+      "x": 740, "y": 895, "type": "api", "icon": "▦", "label": "misc APIs + public", "sub": "active · support surfaces",
+      "detail": {
+        "title": "Templates / Settings / Observability / Feed / Docs / Public",
+        "subtitle": "api · supporting endpoints",
+        "tags": ["api", "backend", "support"],
+        "flow": [
+          "/api/templates, /api/settings, /api/observability, /api/countries",
+          "/api docs (/docs, /openapi.yaml, /openapi.json) + feed (/feed.atom, /feed.rss)",
+          "Public (no /api): /share/:id, /watch/:id, /sitemap.xml, /robots.txt, /api/config/*"
+        ],
+        "apis": [
+          {"method": "GET", "path": "/api/templates/list", "desc": "Preset simulation templates.", "params": [], "auth": "service", "status": "active"},
+          {"method": "GET", "path": "/api/observability/events/stream", "desc": "SSE trace/debug stream.", "params": [], "auth": "service", "status": "active"},
+          {"method": "GET", "path": "/api/openapi.json", "desc": "OpenAPI spec for the backend.", "params": [], "auth": "public", "status": "active"}
+        ],
+        "schemas": [],
+        "notes": "OpenAPI already published at /api/openapi.json - useful base for the S2S contract.",
+        "constraints": [],
+        "risks": []
+      }
+    },
+
+    {
+      "id": "simulation-manager",
+      "x": 1050, "y": 180, "type": "service", "icon": "◰", "label": "SimulationManager", "sub": "service · state",
+      "detail": {
+        "title": "SimulationManager",
+        "subtitle": "service · orchestrates simulation state",
+        "tags": ["service", "core"],
+        "flow": ["Holds SimulationState/Status", "Coordinates prepare -> run -> report"],
+        "apis": [],
+        "schemas": ["SimulationState", "SimulationStatus"],
+        "notes": "backend/app/services/simulation_manager.py. Natural internal target for /api/scenario.",
+        "constraints": [],
+        "risks": []
+      }
+    },
+    {
+      "id": "simulation-runner",
+      "x": 1050, "y": 345, "type": "service", "icon": "⛬", "label": "SimulationRunner", "sub": "service · subprocess",
+      "detail": {
+        "title": "SimulationRunner",
+        "subtitle": "service · spawns a subprocess per run",
+        "tags": ["service", "subprocess", "core"],
+        "flow": ["Spawns simulation subprocess", "register_cleanup() on app startup for safe teardown"],
+        "apis": [],
+        "schemas": ["SimulationRunState", "RunnerStatus", "AgentAction", "RoundSummary"],
+        "notes": "backend/app/services/simulation_runner.py (very large). Runs out-of-process.",
+        "constraints": ["Runs as subprocess, not in-process"],
+        "risks": ["Subprocess lifecycle/cleanup must survive S2S concurrency"]
+      }
+    },
+    {
+      "id": "simulation-ipc",
+      "x": 1050, "y": 500, "type": "service", "icon": "⇄", "label": "SimulationIPC", "sub": "service · socket IPC",
+      "detail": {
+        "title": "SimulationIPC",
+        "subtitle": "service · socket-based IPC",
+        "tags": ["service", "ipc"],
+        "flow": ["Client/Server over socket between backend and run subprocess"],
+        "apis": [],
+        "schemas": ["IPCCommand", "IPCResponse", "CommandType", "CommandStatus"],
+        "notes": "backend/app/services/simulation_ipc.py.",
+        "constraints": [],
+        "risks": []
+      }
+    },
+    {
+      "id": "config-generator",
+      "x": 1050, "y": 60, "type": "service", "icon": "⚒", "label": "ConfigGenerator", "sub": "service · sim config",
+      "detail": {
+        "title": "SimulationConfigGenerator",
+        "subtitle": "service · builds run config",
+        "tags": ["service", "llm"],
+        "flow": ["Derives SimulationParameters, AgentActivity, Time, Event, Platform config from a scenario"],
+        "apis": [],
+        "schemas": ["SimulationParameters", "AgentActivityConfig", "TimeSimulationConfig", "EventConfig", "PlatformConfig"],
+        "notes": "Maps an incoming ScenarioSeed/Config onto a Wonderwall run config.",
+        "constraints": [],
+        "risks": ["S2S SimulationConfig (mode/horizon) must map cleanly onto these params"]
+      }
+    },
+    {
+      "id": "profile-generator",
+      "x": 1050, "y": 650, "type": "service", "icon": "☷", "label": "ProfileGenerator", "sub": "service · agent personas",
+      "detail": {
+        "title": "WonderwallProfileGenerator",
+        "subtitle": "service · generates agent profiles",
+        "tags": ["service", "llm", "personas"],
+        "flow": ["Generates WonderwallAgentProfile set", "Optional demographic grounding (Nemotron personas)"],
+        "apis": [],
+        "schemas": ["WonderwallAgentProfile"],
+        "notes": "demographic_sampler.py is optional (degrades without duckdb/huggingface_hub).",
+        "constraints": [],
+        "risks": []
+      }
+    },
+    {
+      "id": "report-agent",
+      "x": 1050, "y": 800, "type": "agent", "icon": "✺", "label": "ReportAgent", "sub": "agent · final report",
+      "detail": {
+        "title": "ReportAgent",
+        "subtitle": "agent · LLM report + ontology extraction",
+        "tags": ["agent", "llm", "smart"],
+        "flow": ["Reads simulation graph + actions", "Calls SMART LLM to write the structured report"],
+        "apis": [],
+        "schemas": ["Report"],
+        "notes": "backend/app/services/report_agent.py (very large). Uses SMART_* tier.",
+        "constraints": [],
+        "risks": ["Output is a report, not ScenarioBranchV1 -> normalization gap"]
+      }
+    },
+    {
+      "id": "graph-services",
+      "x": 1050, "y": 930, "type": "service", "icon": "❈", "label": "Graph Services", "sub": "service · graph build/memory",
+      "detail": {
+        "title": "Graph Services",
+        "subtitle": "service · ontology, builder, memory updater, tools",
+        "tags": ["service", "graph"],
+        "flow": ["OntologyGenerator, GraphBuilderService, GraphMemoryUpdater, graph_tools"],
+        "apis": [],
+        "schemas": [],
+        "notes": "Episodic agent memory stored as graph edges in Neo4j.",
+        "constraints": [],
+        "risks": []
+      }
+    },
+    {
+      "id": "notification-services",
+      "x": 1050, "y": 1060, "type": "external", "icon": "✉", "label": "Notification Fanout", "sub": "service · channels",
+      "detail": {
+        "title": "Notification / Publishing Services",
+        "subtitle": "service · outbound integrations",
+        "tags": ["service", "integrations", "outbound"],
+        "flow": ["Discord / Slack / Telegram / Email / Webhook / Push", "DKG + WaybackClaw publishers"],
+        "apis": [],
+        "schemas": [],
+        "notes": "/api/config/notifications probes which channels are wired without leaking URLs.",
+        "constraints": [],
+        "risks": []
+      }
+    },
+
+    {
+      "id": "wonderwall",
+      "x": 1380, "y": 360, "type": "workflow", "icon": "🦈", "label": "Wonderwall", "sub": "bundled · multi-agent sim",
+      "detail": {
+        "title": "Wonderwall (bundled camel-oasis fork)",
+        "subtitle": "workflow · swarm of SocialAgents",
+        "tags": ["workflow", "agents", "bundled"],
+        "flow": [
+          "social_agent + environment + social_platform + clock + simulations",
+          "Hundreds of graph-connected SocialAgent instances simulate Twitter/Reddit + prediction market hour-by-hour"
+        ],
+        "apis": [],
+        "schemas": [],
+        "notes": "Bundled at backend/wonderwall/, NOT a PyPI install - edits change sim behavior directly.",
+        "constraints": ["Modify in-tree"],
+        "risks": []
+      }
+    },
+    {
+      "id": "neo4j",
+      "x": 1380, "y": 560, "type": "data", "icon": "▣", "label": "Neo4j", "sub": "data · :7687",
+      "detail": {
+        "title": "Neo4j Graph Store",
+        "subtitle": "data · single source of truth",
+        "tags": ["data", "graph", "infra"],
+        "flow": ["Simulation state as nodes", "Agent memory as episodic edges"],
+        "apis": [],
+        "schemas": [],
+        "notes": "Singleton in app.extensions['neo4j_storage']; endpoints return 503 gracefully when None. No relational DB.",
+        "constraints": ["Everything persists here"],
+        "risks": ["Single dependency - down = 503 across graph/report endpoints"]
+      }
+    },
+    {
+      "id": "search-service",
+      "x": 1380, "y": 715, "type": "infra", "icon": "⌕", "label": "Hybrid Search", "sub": "infra · retrieval",
+      "detail": {
+        "title": "Hybrid Search + Reranker",
+        "subtitle": "infra · vector + BM25 + graph traversal",
+        "tags": ["infra", "search"],
+        "flow": ["search_service combines vector + BM25 + graph", "reranker_service cross-encoder rerank"],
+        "apis": [],
+        "schemas": [],
+        "notes": "backend/app/storage/search_service.py + reranker_service.py.",
+        "constraints": [],
+        "risks": []
+      }
+    },
+    {
+      "id": "embedding-service",
+      "x": 1380, "y": 835, "type": "infra", "icon": "⊹", "label": "Embeddings", "sub": "infra · Ollama/OpenAI",
+      "detail": {
+        "title": "Embedding Service",
+        "subtitle": "infra · OpenAI-compatible / Ollama",
+        "tags": ["infra", "embeddings"],
+        "flow": ["Embeds nodes/text for vector search"],
+        "apis": [],
+        "schemas": [],
+        "notes": "EMBEDDING_PROVIDER / EMBEDDING_MODEL / EMBEDDING_BASE_URL.",
+        "constraints": [],
+        "risks": []
+      }
+    },
+    {
+      "id": "llm-default",
+      "x": 1380, "y": 110, "type": "external", "icon": "✦", "label": "LLM (default)", "sub": "external · cheap/fast",
+      "detail": {
+        "title": "Default LLM tier",
+        "subtitle": "external · OpenAI-compatible",
+        "tags": ["external", "llm"],
+        "flow": ["Persona generation, sim config, memory compaction"],
+        "apis": [],
+        "schemas": [],
+        "notes": "LLM_API_KEY / LLM_BASE_URL / LLM_MODEL_NAME.",
+        "constraints": [],
+        "risks": []
+      }
+    },
+    {
+      "id": "llm-smart",
+      "x": 1380, "y": 230, "type": "external", "icon": "✧", "label": "LLM (smart)", "sub": "external · reports/ontology",
+      "detail": {
+        "title": "Smart LLM tier",
+        "subtitle": "external · stronger model (optional)",
+        "tags": ["external", "llm", "smart"],
+        "flow": ["Final reports + ontology extraction"],
+        "apis": [],
+        "schemas": [],
+        "notes": "SMART_API_KEY / SMART_BASE_URL / SMART_MODEL_NAME.",
+        "constraints": [],
+        "risks": []
+      }
+    }
+  ],
+  "edges": [
+    {"from": "pattern-amp-ui", "to": "bazodiac-backend", "style": "primary", "relation": "user-flow", "protocol": "HTTP", "label": "Run Scenario / poll"},
+    {"from": "bazodiac-backend", "to": "supabase", "style": "data", "relation": "data-flow", "protocol": "HTTP", "label": "load P0/P1/P2 tables (service key)"},
+    {"from": "bazodiac-backend", "to": "scenario-tables", "style": "data", "relation": "data-flow", "protocol": "HTTP", "label": "persist runs/seeds/branches (planned)"},
+    {"from": "bazodiac-backend", "to": "scenario-orchestrator", "style": "primary", "relation": "dependency", "protocol": "internal", "label": "build seed + normalize"},
+
+    {"from": "scenario-orchestrator", "to": "miroshark-scenario-api", "style": "primary", "relation": "api-call", "protocol": "HTTP", "method": "POST", "path": "/api/scenario/run", "description": "Submit ScenarioSeed.md + generic prompt + simulation config; returns runId (planned S2S facade).", "critical": true},
+    {"from": "scenario-orchestrator", "to": "miroshark-scenario-api", "style": "api", "relation": "api-call", "protocol": "HTTP", "method": "GET", "path": "/api/scenario/run/:runId", "description": "Poll scenario run status (planned).", "critical": true},
+    {"from": "scenario-orchestrator", "to": "miroshark-scenario-api", "style": "api", "relation": "api-call", "protocol": "HTTP", "method": "GET", "path": "/api/scenario/run/:runId/branches", "description": "Fetch normalized ScenarioBranchV1[] (planned).", "critical": true},
+
+    {"from": "scenario-orchestrator", "to": "api-simulation", "style": "api", "relation": "api-call", "protocol": "HTTP", "method": "POST", "path": "/api/simulation/prepare", "description": "Current-path option: prepare a run directly (until /api/scenario exists).", "critical": false},
+    {"from": "scenario-orchestrator", "to": "api-simulation", "style": "api", "relation": "api-call", "protocol": "HTTP", "method": "POST", "path": "/api/simulation/start", "description": "Current-path option: start the run subprocess.", "critical": false},
+    {"from": "scenario-orchestrator", "to": "api-simulation", "style": "api", "relation": "api-call", "protocol": "HTTP", "method": "GET", "path": "/api/simulation/:simulation_id/run-status", "description": "Current-path option: poll run status.", "critical": false},
+    {"from": "scenario-orchestrator", "to": "api-report", "style": "api", "relation": "api-call", "protocol": "HTTP", "method": "GET", "path": "/api/report/by-simulation/:simulation_id", "description": "Current-path option: fetch final report, then normalize to branches.", "critical": false},
+
+    {"from": "miroshark-scenario-api", "to": "simulation-manager", "style": "secondary", "relation": "dependency", "protocol": "internal", "label": "delegates lifecycle"},
+    {"from": "miroshark-scenario-api", "to": "report-agent", "style": "secondary", "relation": "dependency", "protocol": "internal", "label": "pulls report output"},
+
+    {"from": "frontend-spa", "to": "api-simulation", "style": "secondary", "relation": "user-flow", "protocol": "HTTP", "label": "/api/*"},
+    {"from": "frontend-spa", "to": "api-report", "style": "secondary", "relation": "user-flow", "protocol": "HTTP", "label": "/api/*"},
+    {"from": "frontend-spa", "to": "api-graph", "style": "secondary", "relation": "user-flow", "protocol": "HTTP", "label": "/api/*"},
+
+    {"from": "api-simulation", "to": "simulation-manager", "style": "secondary", "relation": "dependency", "protocol": "internal", "label": "manage state"},
+    {"from": "api-simulation", "to": "config-generator", "style": "secondary", "relation": "dependency", "protocol": "internal", "label": "build config"},
+    {"from": "api-simulation", "to": "profile-generator", "style": "secondary", "relation": "dependency", "protocol": "internal", "label": "build profiles"},
+    {"from": "simulation-manager", "to": "simulation-runner", "style": "secondary", "relation": "dependency", "protocol": "internal", "label": "spawn run"},
+    {"from": "simulation-runner", "to": "simulation-ipc", "style": "secondary", "relation": "dependency", "protocol": "internal", "label": "socket IPC"},
+    {"from": "simulation-runner", "to": "wonderwall", "style": "secondary", "relation": "dependency", "protocol": "internal", "label": "run swarm"},
+    {"from": "config-generator", "to": "llm-default", "style": "secondary", "relation": "dependency", "protocol": "HTTP", "label": "LLM_* calls"},
+    {"from": "profile-generator", "to": "llm-default", "style": "secondary", "relation": "dependency", "protocol": "HTTP", "label": "LLM_* calls"},
+    {"from": "wonderwall", "to": "llm-default", "style": "secondary", "relation": "dependency", "protocol": "HTTP", "label": "agent turns"},
+
+    {"from": "api-report", "to": "report-agent", "style": "secondary", "relation": "dependency", "protocol": "internal", "label": "generate report"},
+    {"from": "report-agent", "to": "llm-smart", "style": "secondary", "relation": "dependency", "protocol": "HTTP", "label": "SMART_* calls"},
+    {"from": "report-agent", "to": "search-service", "style": "secondary", "relation": "dependency", "protocol": "internal", "label": "retrieve evidence"},
+
+    {"from": "api-graph", "to": "graph-services", "style": "secondary", "relation": "dependency", "protocol": "internal", "label": "build/ontology"},
+    {"from": "graph-services", "to": "neo4j", "style": "data", "relation": "data-flow", "protocol": "internal", "label": "read/write graph"},
+    {"from": "graph-services", "to": "embedding-service", "style": "secondary", "relation": "dependency", "protocol": "HTTP", "label": "embed"},
+    {"from": "search-service", "to": "neo4j", "style": "data", "relation": "data-flow", "protocol": "internal", "label": "vector+BM25+traversal"},
+    {"from": "search-service", "to": "embedding-service", "style": "secondary", "relation": "dependency", "protocol": "HTTP", "label": "query embed"},
+    {"from": "simulation-runner", "to": "neo4j", "style": "data", "relation": "data-flow", "protocol": "internal", "label": "persist state/memory"},
+    {"from": "report-agent", "to": "neo4j", "style": "data", "relation": "data-flow", "protocol": "internal", "label": "read sim graph"},
+
+    {"from": "api-mcp", "to": "graph-services", "style": "secondary", "relation": "dependency", "protocol": "internal", "label": "expose tools"},
+    {"from": "simulation-manager", "to": "notification-services", "style": "event", "relation": "event-flow", "protocol": "internal", "label": "run events"},
+    {"from": "wonderwall", "to": "search-service", "style": "secondary", "relation": "dependency", "protocol": "internal", "label": "agent retrieval"}
+  ],
+  "changes": []
+}

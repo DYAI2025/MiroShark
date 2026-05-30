@@ -1,0 +1,13 @@
+{
+  "profile": "present",
+  "birthDataTable": "missing",
+  "astroProfile": "present",
+  "natalChart": "present",
+  "eveHypotheses": "present",
+  "eveAnchors": "present",
+  "dailyPulses": "present",
+  "agentConversations": "present",
+  "spaceWeather": "present_but_stale",
+  "userSignatureState": "missing",
+  "scenarioPersistence": "missing"
+}
