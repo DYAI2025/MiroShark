@@ -28,7 +28,7 @@ gcloud run deploy "${SERVICE}" \
   --max-instances=3 \
   --timeout=300 \
   --concurrency=10 \
-  --no-allow-unauthenticated \
+  --allow-unauthenticated \
   --env-vars-file=cloudrun.env.yaml
 
 echo "==> Done. Service URL:"

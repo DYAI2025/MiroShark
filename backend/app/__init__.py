@@ -84,6 +84,10 @@ def create_app(config_class=Config):
         if request.path in ['/api/openapi.json', '/api/openapi.yaml', '/api/docs']:
             return
         
+        # Let CORS preflight through — browser sends OPTIONS without custom headers
+        if request.method == 'OPTIONS':
+            return
+
         # Only protect /api/* routes
         if not request.path.startswith('/api/'):
             return
