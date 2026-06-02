@@ -119,6 +119,7 @@ DEMOGRAPHICS_COUNTRY     # e.g. "us", "sg" — Nemotron-anchored persona groundi
 WEB_SEARCH_MODEL         # e.g. "perplexity/sonar-pro" — web-enriched persona research
 ENABLE_SITEMAP           # default true; set false for private deployments
 FLASK_DEBUG              # default true
+OLLAMA_NUM_CTX=8192      # 8192 works with Gemma4 7.5B; 16384 causes OOM/timeout
 ```
 
 ## Cloud Run (staging)
