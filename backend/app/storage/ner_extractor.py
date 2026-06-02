@@ -57,7 +57,7 @@ class NERExtractor:
                 result = self.llm.chat_json(
                     messages=messages,
                     temperature=0.1,  # Low temp for extraction precision
-                    max_tokens=4096,
+                    max_tokens=1024,  # NER responses are compact; 4096 caused Ollama timeouts
                 )
                 return self._validate_and_clean(result, ontology)
 
@@ -68,12 +68,17 @@ class NERExtractor:
                 )
             except Exception as e:
                 last_error = e
-                logger.error(f"NER extraction error: {e}")
+                # Log timeout and connection errors explicitly so silent failures are visible
+                logger.error(
+                    f"NER extraction error (attempt {attempt + 1}/{self.max_retries + 1}): "
+                    f"{type(e).__name__}: {e}"
+                )
                 if attempt >= self.max_retries:
                     break
 
         logger.error(
-            f"NER extraction failed after {self.max_retries + 1} attempts: {last_error}"
+            f"NER extraction failed after {self.max_retries + 1} attempts — "
+            f"returning empty. Last error: {type(last_error).__name__}: {last_error}"
         )
         return {"entities": [], "relations": []}
 

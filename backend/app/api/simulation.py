@@ -737,7 +737,7 @@ def ask_mode():
                 return jsonify({"success": True, "data": {**cached, "cached": True}})
 
         try:
-            llm = create_smart_llm_client(timeout=60.0)
+            llm = create_smart_llm_client(timeout=180.0)
         except Exception as exc:
             logger.warning(f"ask: smart LLM unavailable: {exc}")
             return jsonify({"success": False, "error": "llm_unavailable"}), 503
