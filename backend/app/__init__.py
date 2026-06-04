@@ -115,7 +115,7 @@ def create_app(config_class=Config):
         return response
     
     # Register blueprints
-    from .api import graph_bp, simulation_bp, report_bp, templates_bp, settings_bp, observability_bp, mcp_bp, docs_bp, feed_bp, share_bp, watch_bp, sitemap_bp, notifications_bp, countries_bp, stats_bp
+    from .api import graph_bp, simulation_bp, report_bp, templates_bp, settings_bp, observability_bp, mcp_bp, scenario_bp, docs_bp, feed_bp, share_bp, watch_bp, sitemap_bp, notifications_bp, countries_bp, stats_bp
     app.register_blueprint(graph_bp, url_prefix='/api/graph')
     app.register_blueprint(simulation_bp, url_prefix='/api/simulation')
     app.register_blueprint(report_bp, url_prefix='/api/report')
@@ -123,6 +123,10 @@ def create_app(config_class=Config):
     app.register_blueprint(settings_bp, url_prefix='/api/settings')
     app.register_blueprint(observability_bp, url_prefix='/api/observability')
     app.register_blueprint(mcp_bp, url_prefix='/api/mcp')
+    # scenario_bp serves /api/scenario — the headless S2S entry point that
+    # orchestrates ontology -> graph -> simulate -> report in one call. See
+    # app/api/scenario.py.
+    app.register_blueprint(scenario_bp, url_prefix='/api/scenario')
     # countries_bp serves /api/countries (+ /api/countries/<code>) — the
     # demographic-pack registry the SPA reads to render the country picker
     # on the New Sim form.

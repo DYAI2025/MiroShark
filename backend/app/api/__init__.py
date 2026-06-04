@@ -11,6 +11,7 @@ templates_bp = Blueprint('templates', __name__)
 settings_bp = Blueprint('settings', __name__)
 observability_bp = Blueprint('observability', __name__)
 mcp_bp = Blueprint('mcp', __name__)
+scenario_bp = Blueprint('scenario', __name__)
 docs_bp = Blueprint('docs', __name__)
 feed_bp = Blueprint('feed', __name__)
 countries_bp = Blueprint('countries', __name__)
@@ -22,6 +23,7 @@ from . import templates  # noqa: E402, F401
 from . import settings  # noqa: E402, F401
 from . import observability  # noqa: E402, F401
 from . import mcp  # noqa: E402, F401
+from . import scenario  # noqa: E402, F401
 from . import docs  # noqa: E402, F401
 from . import feed  # noqa: E402, F401
 from . import countries  # noqa: E402, F401

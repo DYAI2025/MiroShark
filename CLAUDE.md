@@ -61,6 +61,7 @@ All `/api/*` routes require `x-miroshark-internal-key` header when `MIROSHARK_IN
   - `/api/settings` — user settings
   - `/api/observability` — trace/debug data
   - `/api/mcp` — MCP server bridge
+  - `/api/scenario` — headless S2S entry: one POST ingests a ScenarioSeed and orchestrates ontology→graph→simulate→report server-side, pollable by job_id (see `docs/S2S-SCENARIO-API.md`)
   - `/api/feed` — Atom/RSS syndication
   - `/api/countries` — country registry for demographic grounding
   - `/api/docs` — API docs
