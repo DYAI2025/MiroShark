@@ -94,6 +94,44 @@ def test_pipeline_failure_records_stage_and_error():
     assert job["report"] is None
 
 
+def test_pipeline_prepare_refused_fails_fast_not_timeout():
+    """Regression: prepare on a 0-entity graph refuses synchronously
+    (success=false, no task). The orchestrator must fail immediately, not poll
+    prepare/status='not_started' to a timeout."""
+    script = _happy_script()
+    # Replace the prepare trigger with a synchronous refusal (what an empty graph yields).
+    for i, (match, _resp) in enumerate(script):
+        if match("POST", "/api/simulation/prepare") and not match("POST", "/api/simulation/prepare/status"):
+            script[i] = (lambda m, path: path == "/api/simulation/prepare",
+                         (400, {"success": False, "error": "No matching entities found"}))
+            break
+    job_id = sc._new_job()
+    sc.run_pipeline(job_id, {"seed": "x" * 80}, FakeCaller(script),
+                    poll_seconds=0, max_wait=10, sleep=lambda *_: None)
+    job = sc._snapshot(job_id)
+    assert job["status"] == "failed"
+    assert job["stage"] == "prepare"
+    assert "no matching entities" in job["error"].lower()
+
+
+def test_pipeline_not_started_status_is_failure_not_poll():
+    """A status of 'not_started' means the task was never created — fail, not hang."""
+    script = _happy_script()
+    # prepare trigger succeeds but prepare/status always says not_started.
+    for i, (match, _resp) in enumerate(script):
+        if match("POST", "/api/simulation/prepare/status"):
+            script[i] = (lambda m, path: path == "/api/simulation/prepare/status",
+                         (200, {"success": True, "data": {"status": "not_started"}}))
+            break
+    job_id = sc._new_job()
+    sc.run_pipeline(job_id, {"seed": "x" * 80}, FakeCaller(script),
+                    poll_seconds=0, max_wait=10, sleep=lambda *_: None)
+    job = sc._snapshot(job_id)
+    assert job["status"] == "failed"
+    assert job["stage"] == "prepare"
+    assert "not_started" in job["error"]
+
+
 def test_pipeline_missing_project_id_fails_at_ontology():
     script = [(lambda m, path: path == "/api/graph/ontology/generate", (200, {"success": False, "error": "no entities"}))]
     job_id = sc._new_job()

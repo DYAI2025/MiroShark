@@ -149,6 +149,22 @@ def _need(body, keys, status_code, where):
     return cur
 
 
+def _trigger(code, body, stage):
+    """Validate an async-task trigger response. A step that refuses synchronously
+    (e.g. prepare on a graph with 0 entities returns success=false, creating NO
+    task) must fail the job immediately — otherwise the status poll would chase a
+    task that will never exist until it times out."""
+    if code >= 400 or (isinstance(body, dict) and body.get("success") is False):
+        err = body.get("error") if isinstance(body, dict) else None
+        raise PipelineError(f"{stage} refused (HTTP {code}): {err or json.dumps(body)[:300]}", stage)
+    return body
+
+
+# A task that reports 'not_started' was never created — treat as failure, not as
+# a transient state to keep polling (this is what made a refused prepare hang).
+_NEVER_STARTED = {"not_started"}
+
+
 def _poll(caller, getter, ready: set, failed: set, *, stage, poll_seconds, max_wait, sleep):
     """Poll `getter()` (returns (code, body)) until status hits ready/failed/timeout."""
     waited = 0.0
@@ -157,7 +173,7 @@ def _poll(caller, getter, ready: set, failed: set, *, stage, poll_seconds, max_w
         st = _status_of(body)
         if st in ready:
             return body
-        if st in failed:
+        if st in failed or st in _NEVER_STARTED:
             raise PipelineError(f"{stage} reported '{st}': {json.dumps(body)[:300]}", stage)
         if waited >= max_wait:
             raise PipelineError(f"{stage} timed out after {int(max_wait)}s (last status '{st}')", stage)
@@ -210,18 +226,21 @@ def run_pipeline(job_id, params, caller, *, poll_seconds=5.0, max_wait=1800.0, s
         sim_id = _need(body, ["data", "simulation_id"], code, "create")
         _update(job_id, simulation_id=sim_id)
 
-        # 4) prepare + poll (prepare/status is POST)
+        # 4) prepare + poll (prepare/status is POST). prepare refuses synchronously
+        # when the graph has 0 entities — check the trigger before polling.
         _update(job_id, stage="prepare")
-        caller.post_json("/api/simulation/prepare", {"simulation_id": sim_id})
+        code, body = caller.post_json("/api/simulation/prepare", {"simulation_id": sim_id})
+        _trigger(code, body, "prepare")
         _poll(caller, lambda: caller.post_json("/api/simulation/prepare/status", {"simulation_id": sim_id}),
               {"ready", "completed", "success"}, {"failed", "error"},
               stage="prepare", poll_seconds=poll_seconds, max_wait=max_wait, sleep=sleep)
 
         # 5) start
         _update(job_id, stage="simulate")
-        caller.post_json("/api/simulation/start", {
+        code, body = caller.post_json("/api/simulation/start", {
             "simulation_id": sim_id, "platform": "parallel", "max_rounds": max_rounds,
         })
+        _trigger(code, body, "simulate")
         # 6) poll run-status
         _poll(caller, lambda: caller.get(f"/api/simulation/{sim_id}/run-status"),
               {"completed", "finished", "stopped", "done"}, {"failed", "error"},
@@ -229,7 +248,8 @@ def run_pipeline(job_id, params, caller, *, poll_seconds=5.0, max_wait=1800.0, s
 
         # 7) report/generate + poll
         _update(job_id, stage="report")
-        caller.post_json("/api/report/generate", {"simulation_id": sim_id})
+        code, body = caller.post_json("/api/report/generate", {"simulation_id": sim_id})
+        _trigger(code, body, "report")
         _poll(caller, lambda: caller.get(f"/api/report/check/{sim_id}"),
               {"completed", "ready", "success"}, {"failed", "error"},
               stage="report", poll_seconds=poll_seconds, max_wait=max_wait, sleep=sleep)
