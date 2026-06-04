@@ -7,16 +7,29 @@ Datei ist die Vorlage, aus der du sie auf dem Zielrechner neu anlegst.
 
 > **Wichtigste Lehre der Session:** `gemma4:e4b` ist zu schwach für NER —
 > es gibt leeres JSON zurück → 0 Entities → Step 03 „No matching entities".
-> Auf Linux ein **NER-fähiges** Modell ziehen (`qwen2.5:7b-instruct` oder
-> `:14b`). Ontology schafft gemma4, NER nicht.
+> Auf Linux ein **NER-fähiges** Modell ziehen (`qwen2.5:7b` oder `:14b`).
+> Ontology schafft gemma4, NER nicht.
+
+## Schnellstart (ein Befehl)
+
+```bash
+bash scripts/local_setup.sh                # config + ollama-modelle + deps
+bash scripts/local_setup.sh --neo4j-docker # + Neo4j-Container starten
+npm run dev
+```
+
+`local_setup.sh` ist **idempotent**: legt `.env` + `frontend/.env.local` nur an,
+wenn sie fehlen (kein Überschreiben), generiert den Internal-Key einmal und
+trägt ihn in beide identisch ein, zieht fehlende Ollama-Modelle. Die Abschnitte
+unten erklären, was es macht / für manuelles Setup.
 
 ## 1. Voraussetzungen
 
 ```bash
 # Ollama (https://ollama.com), Neo4j (CE), Node >=18, uv (python), jq/curl
-ollama pull qwen2.5:7b-instruct     # LLM/NER/Reports — macht JSON zuverlässig
+ollama pull qwen2.5:7b     # LLM/NER/Reports — macht JSON zuverlässig
 ollama pull nomic-embed-text        # Embeddings (768-dim)
-# qwen2.5:14b-instruct ist besser, wenn genug RAM da ist.
+# qwen2.5:14b ist besser, wenn genug RAM da ist.
 ```
 
 Neo4j lokal starten (Bolt auf `:7687`), Passwort merken (unten in `.env`).
@@ -35,7 +48,7 @@ NEO4J_PASSWORD=miroshark            # == was du in Neo4j gesetzt hast
 LLM_PROVIDER=openai
 LLM_API_KEY=ollama
 LLM_BASE_URL=http://localhost:11434/v1
-LLM_MODEL_NAME=qwen2.5:7b-instruct  # NICHT gemma4:e4b (NER scheitert)
+LLM_MODEL_NAME=qwen2.5:7b  # NICHT gemma4:e4b (NER scheitert)
 
 # SMART_* leer lassen -> erbt LLM_* (Reports/Ontology nutzen dann dasselbe Modell)
 
