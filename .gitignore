@@ -67,3 +67,7 @@ backend/uploads/
 # Docker data
 data/
 cloudrun.env.yaml
+
+# local vector DB build artifacts (recur every session)
+ruvector.db
+**/ruvector.db
