@@ -9260,7 +9260,7 @@ def trace_interview_agent(simulation_id: str, agent_name: str):
         messages.append({"role": "user", "content": question})
 
         # --- LLM call ---
-        llm = create_smart_llm_client(timeout=90.0)
+        llm = create_smart_llm_client(timeout=300.0)
         answer = llm.chat(messages=messages, temperature=0.75, max_tokens=800)
 
         # --- Persist transcript ---

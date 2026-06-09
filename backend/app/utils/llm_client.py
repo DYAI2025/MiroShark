@@ -72,7 +72,7 @@ def create_llm_client(
     api_key: Optional[str] = None,
     base_url: Optional[str] = None,
     model: Optional[str] = None,
-    timeout: float = 300.0
+    timeout: float = 600.0
 ):
     """
     Factory: returns ClaudeCodeClient when LLM_PROVIDER=claude-code,
@@ -84,7 +84,7 @@ def create_llm_client(
     return LLMClient(api_key=api_key, base_url=base_url, model=model, timeout=timeout)
 
 
-def create_smart_llm_client(timeout: float = 300.0):
+def create_smart_llm_client(timeout: float = 600.0):
     """
     Factory for intelligence-sensitive workflows (reports, ontology, graph reasoning).
     Uses SMART_* config when set, otherwise falls back to the default LLM client.
@@ -106,7 +106,7 @@ def create_smart_llm_client(timeout: float = 300.0):
     )
 
 
-def create_ner_llm_client(timeout: float = 120.0):
+def create_ner_llm_client(timeout: float = 300.0):
     """
     Factory for NER extraction — a mechanical task that works fine on smaller/faster models.
     Uses NER_* config when set, otherwise falls back to the default LLM client.

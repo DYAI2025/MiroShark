@@ -48,7 +48,8 @@ class BeliefState:
             topics: List of topic strings extracted from the simulation requirement.
         """
         stance_str = agent_config.get("stance", "neutral")
-        sentiment_bias = agent_config.get("sentiment_bias", 0.0)
+        raw_bias = agent_config.get("sentiment_bias", 0.0)
+        sentiment_bias = float(raw_bias) if raw_bias is not None else 0.0
 
         stance_map = {
             "supportive": 0.6,

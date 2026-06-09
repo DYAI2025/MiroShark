@@ -502,12 +502,12 @@ class SimulationRunner:
             except Exception:
                 pass
 
-            # Forward runtime Wonderwall slot overrides (Settings UI mutates
-            # Config but not os.environ). Each script prefers WONDERWALL_*
+            # Forward runtime slot overrides (Settings UI mutates Config but
+            # not os.environ). Each script prefers its slot-specific env vars
             # over LLM_* and falls back when empty, so passing through only
             # non-empty values keeps existing setups untouched.
             from ..config import Config as _Cfg
-            for _attr in ('WONDERWALL_API_KEY', 'WONDERWALL_BASE_URL', 'WONDERWALL_MODEL_NAME'):
+            for _attr in ('WONDERWALL_API_KEY', 'WONDERWALL_BASE_URL', 'WONDERWALL_MODEL_NAME',):
                 _val = getattr(_Cfg, _attr, '') or ''
                 if _val:
                     env[_attr] = _val
