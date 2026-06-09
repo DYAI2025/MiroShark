@@ -1375,7 +1375,19 @@ def create_simulation():
                 "min_age": 21,
                 "max_age": 65,
                 "occupations": ["teacher"]
-            }
+            },
+            "predefined_agents": [           // Optional, hardcoded personas (bypasses NER)
+                {
+                    "name": "Alice",
+                    "age": 32,
+                    "gender": "female",
+                    "profession": "teacher",
+                    "persona": "Full persona description...",
+                    "mbti": "ENFJ",
+                    "interests": ["reading", "psychology"],
+                    "risk_tolerance": "low"
+                }
+            ]
         }
 
     Returns:
@@ -1427,6 +1439,10 @@ def create_simulation():
         if raw_filters is not None and not isinstance(raw_filters, dict):
             raw_filters = None
 
+        predefined_agents = data.get('predefined_agents', [])
+        if not isinstance(predefined_agents, list):
+            predefined_agents = []
+
         manager = SimulationManager()
         state = manager.create_simulation(
             project_id=project_id,
@@ -1437,6 +1453,7 @@ def create_simulation():
             polymarket_market_count=data.get('polymarket_market_count', 1),
             country=data.get('country'),
             demographic_filters=raw_filters,
+            predefined_agents=predefined_agents,
         )
         
         return jsonify({
@@ -1951,6 +1968,11 @@ def prepare_simulation():
                         progress_detail=progress_detail_data
                     )
                 
+                # Load predefined_agents from simulation state
+                state_snapshot = manager.get_simulation(simulation_id)
+                predefined_agents = (state_snapshot.predefined_agents
+                                     if state_snapshot else [])
+
                 result_state = manager.prepare_simulation(
                     simulation_id=simulation_id,
                     simulation_requirement=simulation_requirement,
@@ -1959,7 +1981,8 @@ def prepare_simulation():
                     use_llm_for_profiles=use_llm_for_profiles,
                     progress_callback=progress_callback,
                     parallel_profile_count=parallel_profile_count,
-                    storage=storage
+                    storage=storage,
+                    predefined_agents=predefined_agents,
                 )
                 
                 # Task complete

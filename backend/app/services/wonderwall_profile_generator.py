@@ -1056,7 +1056,8 @@ IMPORTANT: Do NOT include karma, friend_count, follower_count, or statuses_count
         graph_id: Optional[str] = None,
         parallel_count: int = 15,
         realtime_output_path: Optional[str] = None,
-        output_platform: str = "reddit"
+        output_platform: str = "reddit",
+        predefined_agents: Optional[List[Dict[str, Any]]] = None,
     ) -> List[WonderwallAgentProfile]:
         """
         Batch generate Agent Profiles from entities (supports parallel generation)
@@ -1243,7 +1244,41 @@ IMPORTANT: Do NOT include karma, friend_count, follower_count, or statuses_count
         print(f"\n{'='*60}")
         print(f"Persona generation complete! Generated {len([p for p in profiles if p])} Agents")
         print(f"{'='*60}\n")
-        
+
+        # ── Inject predefined agents (hardcoded personas) ──────────────
+        if predefined_agents:
+            start_idx = len(profiles)
+            for i, agent_def in enumerate(predefined_agents):
+                if not isinstance(agent_def, dict):
+                    continue
+                name = agent_def.get("name", f"Predefined_{i}")
+                profile = WonderwallAgentProfile(
+                    user_id=start_idx + i,
+                    user_name=agent_def.get("user_name", self._generate_username(name)),
+                    name=name,
+                    bio=agent_def.get("bio", agent_def.get("persona", "")[:100]),
+                    persona=agent_def.get("persona", ""),
+                    age=agent_def.get("age"),
+                    gender=agent_def.get("gender"),
+                    mbti=agent_def.get("mbti"),
+                    country=agent_def.get("country"),
+                    profession=agent_def.get("profession"),
+                    interested_topics=agent_def.get("interested_topics", agent_def.get("interests", [])),
+                    karma=agent_def.get("karma", 1000),
+                    friend_count=agent_def.get("friend_count", 200),
+                    follower_count=agent_def.get("follower_count", 500),
+                    statuses_count=agent_def.get("statuses_count", 800),
+                    risk_tolerance=agent_def.get("risk_tolerance", "moderate"),
+                    source_entity_uuid=agent_def.get("source_entity_uuid", f"predefined_{i}"),
+                    source_entity_type=agent_def.get("source_entity_type", "predefined"),
+                )
+                profiles.append(profile)
+                if progress_callback:
+                    progress_callback(len(profiles), len(profiles), f"Injected predefined agent: {name}")
+
+            print(f"\n  [+] Injected {len(predefined_agents)} predefined agent profiles")
+            print(f"{'='*60}\n")
+
         return profiles
     
     def _print_generated_profile(self, entity_name: str, entity_type: str, profile: WonderwallAgentProfile):

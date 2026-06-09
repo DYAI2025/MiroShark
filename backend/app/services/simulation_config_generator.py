@@ -319,13 +319,17 @@ class SimulationConfigGenerator:
         num_entities = len(entities)
         time_config_result = self._generate_time_config(context, num_entities)
         time_config = self._parse_time_config(time_config_result, num_entities)
-        reasoning_parts.append(f"Time config: {time_config_result.get('reasoning', 'success')}")
+        time_reasoning = (time_config_result.get('reasoning', 'success')
+                          if isinstance(time_config_result, dict) else 'success')
+        reasoning_parts.append(f"Time config: {time_reasoning}")
 
         # ========== Step 2: Generate event configuration ==========
         report_progress(2, "Generating event configuration and hot topics...")
         event_config_result = self._generate_event_config(context, simulation_requirement, entities)
         event_config = self._parse_event_config(event_config_result)
-        reasoning_parts.append(f"Event config: {event_config_result.get('reasoning', 'success')}")
+        event_reasoning = (event_config_result.get('reasoning', 'success')
+                           if isinstance(event_config_result, dict) else 'success')
+        reasoning_parts.append(f"Event config: {event_reasoning}")
 
         # ========== Step 2b: Generate prediction markets ==========
         report_progress(3, "Generating prediction markets...")
@@ -500,7 +504,12 @@ class SimulationConfigGenerator:
 
                 # Try to parse JSON
                 try:
-                    return json.loads(content)
+                    parsed = json.loads(content)
+                    if not isinstance(parsed, dict):
+                        raise ValueError(
+                            f"LLM returned {type(parsed).__name__}, expected dict"
+                        )
+                    return parsed
                 except json.JSONDecodeError as e:
                     logger.warning(f"JSON parsing failed (attempt {attempt+1}): {str(e)[:80]}")
 
@@ -538,13 +547,13 @@ class SimulationConfigGenerator:
         return content
 
     def _try_fix_config_json(self, content: str) -> Optional[Dict[str, Any]]:
-        """Try to fix configuration JSON"""
+        """Try to fix configuration JSON. Returns None if result is not a dict."""
         import re
 
         # Fix truncated case
         content = self._fix_truncated_json(content)
 
-        # Extract JSON portion
+        # Extract JSON portion (object only)
         json_match = re.search(r'\{[\s\S]*\}', content)
         if json_match:
             json_str = json_match.group()
@@ -650,8 +659,12 @@ Field descriptions:
             "reasoning": "Using default daily schedule configuration (1 hour per round)"
         }
 
-    def _parse_time_config(self, result: Dict[str, Any], num_entities: int) -> TimeSimulationConfig:
+    def _parse_time_config(self, result, num_entities: int) -> TimeSimulationConfig:
         """Parse time configuration result and validate agents_per_hour values don't exceed total agent count"""
+        # Guard: LLM occasionally returns a list instead of dict
+        if not isinstance(result, dict):
+            logger.warning(f"LLM returned non-dict time config ({type(result).__name__}), using defaults")
+            result = self._default_time_config(num_entities)
         # Get raw values
         agents_per_hour_min = result.get("agents_per_hour_min", max(1, num_entities // 15))
         agents_per_hour_max = result.get("agents_per_hour_max", max(5, num_entities // 5))
@@ -762,8 +775,15 @@ Return JSON format (no markdown):
                 "reasoning": "Using default configuration"
             }
 
-    def _parse_event_config(self, result: Dict[str, Any]) -> EventConfig:
+    def _parse_event_config(self, result) -> EventConfig:
         """Parse event configuration result"""
+        if not isinstance(result, dict):
+            logger.warning(f"LLM returned non-dict event config ({type(result).__name__}), using defaults")
+            result = {
+                "initial_posts": [],
+                "hot_topics": [],
+                "narrative_direction": "",
+            }
         return EventConfig(
             initial_posts=result.get("initial_posts", []),
             scheduled_events=[],

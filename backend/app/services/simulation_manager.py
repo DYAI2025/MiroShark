@@ -99,6 +99,12 @@ class SimulationState:
     country: Optional[str] = None
     demographic_filters: Optional[Dict[str, Any]] = None
 
+    # Predefined agent profiles — hardcoded personas injected directly
+    # into the simulation, bypassing NER → entity → LLM persona generation.
+    # Each entry is a dict matching WonderwallAgentProfile fields:
+    #   name, age, gender, profession, persona, mbti, interests, ...
+    predefined_agents: List[Dict[str, Any]] = field(default_factory=list)
+
     def to_dict(self) -> Dict[str, Any]:
         """Full state dictionary (for internal use)"""
         return {
@@ -126,6 +132,7 @@ class SimulationState:
             "is_public": self.is_public,
             "country": self.country,
             "demographic_filters": self.demographic_filters,
+            "predefined_agents": self.predefined_agents,
         }
     
     def to_simple_dict(self) -> Dict[str, Any]:
@@ -225,6 +232,7 @@ class SimulationManager:
             is_public=data.get("is_public", False),
             country=(data.get("country") or None),
             demographic_filters=(data.get("demographic_filters") or None),
+            predefined_agents=data.get("predefined_agents", []),
         )
         
         self._simulations[simulation_id] = state
@@ -240,6 +248,7 @@ class SimulationManager:
         polymarket_market_count: int = 1,
         country: Optional[str] = None,
         demographic_filters: Optional[Dict[str, Any]] = None,
+        predefined_agents: Optional[List[Dict[str, Any]]] = None,
     ) -> SimulationState:
         """
         Create a new simulation
@@ -275,6 +284,7 @@ class SimulationManager:
             status=SimulationStatus.CREATED,
             country=normalized_country,
             demographic_filters=demographic_filters,
+            predefined_agents=predefined_agents or [],
         )
         
         self._save_simulation_state(state)
@@ -292,6 +302,7 @@ class SimulationManager:
         progress_callback: Optional[callable] = None,
         parallel_profile_count: int = 3,
         storage: 'GraphStorage' = None,
+        predefined_agents: Optional[List[Dict[str, Any]]] = None,
     ) -> SimulationState:
         """
         Prepare simulation environment (fully automated)
@@ -413,7 +424,8 @@ class SimulationManager:
                 graph_id=state.graph_id,  # Pass graph_id for graph retrieval
                 parallel_count=parallel_profile_count,  # Parallel generation count
                 realtime_output_path=realtime_output_path,  # Real-time save path
-                output_platform=realtime_platform  # Output format
+                output_platform=realtime_platform,  # Output format
+                predefined_agents=predefined_agents,
             )
             
             state.profiles_count = len(profiles)

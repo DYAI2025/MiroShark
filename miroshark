@@ -2,17 +2,30 @@
 set -euo pipefail
 
 # ──────────────────────────────────────────────────────────
-# MiroShark Launcher
+# MiroShark Launcher — Desktop-ready
 # ──────────────────────────────────────────────────────────
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BACKEND_PORT=5001
 FRONTEND_PORT=3000
 NEO4J_BOLT_PORT=7687
+OLLAMA_PORT=11434
 PIDFILE="$SCRIPT_DIR/.miroshark.pids"
+LOG_DIR="$SCRIPT_DIR/.miroshark-logs"
 
 BACKEND_PID=""
 FRONTEND_PID=""
+OPEN_BROWSER=0
+
+# Load .env into environment (for subprocesses)
+load_env() {
+    if [[ -f "$SCRIPT_DIR/.env" ]]; then
+        set -a
+        # shellcheck disable=SC1091
+        source "$SCRIPT_DIR/.env"
+        set +a
+    fi
+}
 
 # Colors (disabled when not a terminal)
 if [[ -t 1 ]]; then
@@ -241,6 +254,34 @@ ensure_neo4j() {
     return 1
 }
 
+# ── Ollama ─────────────────────────────────────────────────
+
+ensure_ollama() {
+    header "Ollama"
+
+    if check_port "$OLLAMA_PORT"; then
+        success "Ollama already running on port $OLLAMA_PORT"
+        return 0
+    fi
+
+    if ! command -v ollama &>/dev/null; then
+        warn "ollama binary not found — skipping auto-start"
+        return 0
+    fi
+
+    info "Starting Ollama..."
+    nohup ollama serve > "$LOG_DIR/ollama.log" 2>&1 &
+    local ollama_pid=$!
+
+    if wait_for_port "$OLLAMA_PORT" 15; then
+        success "Ollama started (port $OLLAMA_PORT, PID $ollama_pid)"
+        echo "$ollama_pid" >> "$PIDFILE"
+    else
+        warn "Ollama not responding after 15s — continuing anyway"
+    fi
+    return 0
+}
+
 # ── Install Dependencies ──────────────────────────────────
 
 install_deps() {
@@ -326,6 +367,8 @@ cmd_start() {
     printf "${BOLD}${CYAN}  ║${RESET}${BOLD}          M I R O S H A R K         ${CYAN}║${RESET}\n"
     printf "${BOLD}${CYAN}  ╚══════════════════════════════════╝${RESET}\n"
 
+    load_env
+
     check_deps || {
         echo ""
         error "Install missing dependencies above, then re-run ./miroshark"
@@ -336,39 +379,86 @@ cmd_start() {
     ensure_env || exit 1
 
     ensure_neo4j || exit 1
+    ensure_ollama
 
     install_deps
 
     header "Starting"
     kill_stale
 
-    # Start backend
-    (cd "$SCRIPT_DIR/backend" && exec uv run python run.py) &
-    BACKEND_PID=$!
+    mkdir -p "$LOG_DIR"
 
-    # Start frontend
-    (cd "$SCRIPT_DIR/frontend" && exec npx vite --host) &
+    # OLLAMA_NUM_CTX from .env, default 8192
+    OLLAMA_NUM_CTX="${OLLAMA_NUM_CTX:-8192}"
+    export OLLAMA_NUM_CTX
+
+    # Start backend (detached via setsid)
+    setsid -f bash -c "
+        cd '$SCRIPT_DIR/backend'
+        exec uv run python run.py
+    " > "$LOG_DIR/backend.log" 2>&1
+    BACKEND_PID=$!
+    info "Backend starting... (PID $BACKEND_PID)"
+
+    # Start frontend (detached via setsid)
+    setsid -f bash -c "
+        cd '$SCRIPT_DIR/frontend'
+        exec npx vite --host
+    " > "$LOG_DIR/frontend.log" 2>&1
     FRONTEND_PID=$!
+    info "Frontend starting... (PID $FRONTEND_PID)"
 
     # Write PID file
     printf "%s\n%s\n" "$BACKEND_PID" "$FRONTEND_PID" > "$PIDFILE"
 
-    # Set trap after PIDs are known
-    trap cleanup SIGINT SIGTERM
+    # Wait for backend
+    info "Waiting for backend on port $BACKEND_PORT..."
+    if wait_for_port "$BACKEND_PORT" 15; then
+        success "Backend ready"
+    else
+        warn "Backend not responding after 15s — check $LOG_DIR/backend.log"
+    fi
 
-    # Wait for both to be ready
-    sleep 3
+    # Wait for frontend
+    info "Waiting for frontend on port $FRONTEND_PORT..."
+    if wait_for_port "$FRONTEND_PORT" 15; then
+        success "Frontend ready"
+    else
+        warn "Frontend not responding after 15s — check $LOG_DIR/frontend.log"
+    fi
+
     echo ""
     printf "${BOLD}  ┌──────────────────────────────────────┐${RESET}\n"
     printf "${BOLD}  │${RESET}  App:  ${GREEN}http://localhost:${FRONTEND_PORT}${RESET}          ${BOLD}│${RESET}\n"
     printf "${BOLD}  │${RESET}  API:  ${DIM}http://localhost:${BACKEND_PORT}${RESET}          ${BOLD}│${RESET}\n"
     printf "${BOLD}  └──────────────────────────────────────┘${RESET}\n"
-    echo ""
-    info "Press ${BOLD}Ctrl+C${RESET} to stop"
-    echo ""
 
-    # Block until processes exit or signal received
-    wait
+    # Open browser if requested (only when launched from desktop, not terminal)
+    if [[ $OPEN_BROWSER -eq 1 ]]; then
+        local url="http://localhost:${FRONTEND_PORT}"
+        if command -v xdg-open &>/dev/null; then
+            nohup xdg-open "$url" >/dev/null 2>&1 &
+        elif command -v gnome-open &>/dev/null; then
+            nohup gnome-open "$url" >/dev/null 2>&1 &
+        elif command -v open &>/dev/null; then
+            open "$url"
+        fi
+        success "Browser opened to $url"
+    fi
+
+    echo ""
+    info "Logs: ${DIM}$LOG_DIR/${RESET}"
+    info "Stop: ${BOLD}$0 stop${RESET}"
+
+    if [[ -t 1 ]]; then
+        trap cleanup SIGINT SIGTERM
+        info "Press ${BOLD}Ctrl+C${RESET} to stop"
+        echo ""
+        wait
+    else
+        echo ""
+        success "MiroShark running in background (PID $BACKEND_PID)"
+    fi
 }
 
 cmd_stop() {
@@ -489,20 +579,30 @@ cmd_setup() {
 
 cmd_help() {
     printf "\n"
-    printf "${BOLD}Usage:${RESET} ./miroshark [command]\n\n"
+    printf "${BOLD}Usage:${RESET} miroshark [command] [options]\n\n"
     printf "${BOLD}Commands:${RESET}\n"
     printf "  ${GREEN}start${RESET}    Start MiroShark (default)\n"
     printf "  ${GREEN}stop${RESET}     Stop all MiroShark processes\n"
     printf "  ${GREEN}status${RESET}   Show service status\n"
     printf "  ${GREEN}setup${RESET}    Force reinstall all dependencies\n"
-    printf "  ${GREEN}help${RESET}     Show this help message\n"
+    printf "  ${GREEN}help${RESET}     Show this help message\n\n"
+    printf "${BOLD}Options:${RESET}\n"
+    printf "  ${GREEN}--open, -o${RESET}  Open browser after start\n"
     echo ""
 }
 
 # ── Main Dispatcher ───────────────────────────────────────
 
 case "${1:-}" in
-    ""|start)   cmd_start ;;
+    ""|start)
+        shift || true
+        for arg in "$@"; do
+            if [[ "$arg" == "--open" || "$arg" == "-o" ]]; then
+                OPEN_BROWSER=1
+            fi
+        done
+        cmd_start
+        ;;
     stop)       cmd_stop ;;
     status)     cmd_status ;;
     setup)      cmd_setup ;;
