@@ -154,6 +154,13 @@ class Config:
     WONDERWALL_API_KEY = os.environ.get('WONDERWALL_API_KEY', '')
     WONDERWALL_BASE_URL = os.environ.get('WONDERWALL_BASE_URL', '')
 
+    # Wonderwall fallback model — used when primary (e.g. openrouter/free)
+    # returns rate-limit or server error. Falls back to local Ollama model
+    # (e.g. llama3.2) so the simulation never stalls on cloud failures.
+    WONDERWALL_FALLBACK_MODEL_NAME = os.environ.get('WONDERWALL_FALLBACK_MODEL_NAME', '')
+    WONDERWALL_FALLBACK_API_KEY = os.environ.get('WONDERWALL_FALLBACK_API_KEY', '')
+    WONDERWALL_FALLBACK_BASE_URL = os.environ.get('WONDERWALL_FALLBACK_BASE_URL', '')
+
     # NER model — faster model for entity extraction (high-volume, mechanical task)
     # When not set, NER uses the default LLM config above.
     # Cloud preset: google/gemini-3-flash-preview (stable JSON with reasoning disabled)

@@ -507,7 +507,10 @@ class SimulationRunner:
             # over LLM_* and falls back when empty, so passing through only
             # non-empty values keeps existing setups untouched.
             from ..config import Config as _Cfg
-            for _attr in ('WONDERWALL_API_KEY', 'WONDERWALL_BASE_URL', 'WONDERWALL_MODEL_NAME',):
+            for _attr in (
+                'WONDERWALL_API_KEY', 'WONDERWALL_BASE_URL', 'WONDERWALL_MODEL_NAME',
+                'WONDERWALL_FALLBACK_API_KEY', 'WONDERWALL_FALLBACK_BASE_URL', 'WONDERWALL_FALLBACK_MODEL_NAME',
+            ):
                 _val = getattr(_Cfg, _attr, '') or ''
                 if _val:
                     env[_attr] = _val

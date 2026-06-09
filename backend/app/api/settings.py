@@ -109,6 +109,12 @@ def _current_snapshot() -> dict:
             'api_key_masked': _mask_key(Config.WONDERWALL_API_KEY or ''),
             'has_api_key': bool(Config.WONDERWALL_API_KEY),
         },
+        'wonderwall_fallback': {
+            'model_name': Config.WONDERWALL_FALLBACK_MODEL_NAME,
+            'base_url': Config.WONDERWALL_FALLBACK_BASE_URL,
+            'api_key_masked': _mask_key(Config.WONDERWALL_FALLBACK_API_KEY or ''),
+            'has_api_key': bool(Config.WONDERWALL_FALLBACK_API_KEY),
+        },
         'embedding': {
             'provider': Config.EMBEDDING_PROVIDER,
             'base_url': Config.EMBEDDING_BASE_URL,
@@ -202,6 +208,14 @@ def update_settings():
         Config.WONDERWALL_BASE_URL = wonderwall['base_url']
     if wonderwall.get('api_key'):
         Config.WONDERWALL_API_KEY = wonderwall['api_key']
+
+    wonderwall_fallback = body.get('wonderwall_fallback') or {}
+    if wonderwall_fallback.get('model_name') is not None:
+        Config.WONDERWALL_FALLBACK_MODEL_NAME = wonderwall_fallback['model_name']
+    if wonderwall_fallback.get('base_url') is not None:
+        Config.WONDERWALL_FALLBACK_BASE_URL = wonderwall_fallback['base_url']
+    if wonderwall_fallback.get('api_key'):
+        Config.WONDERWALL_FALLBACK_API_KEY = wonderwall_fallback['api_key']
 
     embedding = body.get('embedding') or {}
     if embedding.get('provider') is not None: Config.EMBEDDING_PROVIDER = embedding['provider']

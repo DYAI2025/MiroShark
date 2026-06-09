@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import inspect
 import logging
+import os
 import sys
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Callable, List, Optional, Union
@@ -50,6 +51,38 @@ if "sphinx" not in sys.modules:
         agent_log.addHandler(file_handler)
 
 ALL_SOCIAL_ACTIONS = [action.value for action in ActionType]
+
+_fallback_model_backend = None
+
+
+def _get_fallback_model():
+    global _fallback_model_backend
+    if _fallback_model_backend is not None:
+        return _fallback_model_backend
+    fb_model = os.environ.get('WONDERWALL_FALLBACK_MODEL_NAME', '')
+    if not fb_model:
+        return None
+    fb_api_key = os.environ.get('WONDERWALL_FALLBACK_API_KEY', '') or os.environ.get('LLM_API_KEY', '')
+    fb_base_url = os.environ.get('WONDERWALL_FALLBACK_BASE_URL', '') or os.environ.get('LLM_BASE_URL', '')
+    try:
+        from camel.models import ModelFactory
+        from camel.types import ModelPlatformType
+        _fallback_model_backend = ModelFactory.create(
+            model_platform=ModelPlatformType.OPENAI,
+            model_type=fb_model,
+            api_key=fb_api_key or None,
+            base_url=fb_base_url or None,
+            default_headers={
+                'HTTP-Referer': 'https://github.com/aaronjmars/MiroShark',
+                'X-OpenRouter-Title': 'MiroShark - Universal Swarm Intelligence Engine',
+                'User-Agent': f'MiroShark/1.0 (Wonderwall-Fallback; model={fb_model})',
+            },
+        )
+        logging.getLogger(__name__).info(f'Fallback model created: {fb_model}')
+    except Exception as e:
+        logging.getLogger(__name__).warning(f'Failed to create fallback model: {e}')
+        _fallback_model_backend = None
+    return _fallback_model_backend
 
 
 class SocialAgent(ChatAgent):
@@ -244,6 +277,19 @@ class SocialAgent(ChatAgent):
             return result
         except Exception as e:
             error_msg = str(e)
+            fb_model = _get_fallback_model()
+            if fb_model is not None:
+                logging.getLogger(__name__).warning(
+                    f'SocialAgent {self.social_agent_id}: primary model failed, '
+                    f'trying fallback. Error: {e}'
+                )
+                try:
+                    import asyncio as _asyncio
+                    _loop = _asyncio.get_event_loop()
+                    result = await _loop.run_in_executor(None, fb_model.run, filtered)
+                    return result
+                except Exception as e2:
+                    error_msg = f'Both primary and fallback failed: {e}, {e2}'
             raise
         finally:
             try:
