@@ -183,7 +183,7 @@ def _poll(caller, getter, ready: set, failed: set, *, stage, poll_seconds, max_w
 
 # --- orchestrator (testable: caller + sleep injected) -----------------------
 
-def run_pipeline(job_id, params, caller, *, poll_seconds=5.0, max_wait=1800.0, sleep=time.sleep):
+def run_pipeline(job_id, params, caller, *, poll_seconds=5.0, max_wait=3600.0, sleep=time.sleep):
     try:
         seed = params["seed"]
         requirement = (params.get("requirement") or "").strip() or _DEFAULT_REQUIREMENT
@@ -231,9 +231,19 @@ def run_pipeline(job_id, params, caller, *, poll_seconds=5.0, max_wait=1800.0, s
         _update(job_id, stage="prepare")
         code, body = caller.post_json("/api/simulation/prepare", {"simulation_id": sim_id})
         _trigger(code, body, "prepare")
-        _poll(caller, lambda: caller.post_json("/api/simulation/prepare/status", {"simulation_id": sim_id}),
-              {"ready", "completed", "success"}, {"failed", "error"},
-              stage="prepare", poll_seconds=poll_seconds, max_wait=max_wait, sleep=sleep)
+        prep_body = body.get("data", {}) if isinstance(body, dict) else {}
+        if isinstance(prep_body, dict) and prep_body.get("already_prepared") is True:
+            logger.info("Simulation %s already prepared, skipping status poll", sim_id)
+        else:
+            task_id = prep_body.get("task_id") if isinstance(prep_body, dict) else None
+            if task_id:
+                _poll(caller, lambda: caller.post_json("/api/simulation/prepare/status", {"simulation_id": sim_id, "task_id": task_id}),
+                      {"ready", "completed", "success"}, {"failed", "error"},
+                      stage="prepare", poll_seconds=poll_seconds, max_wait=max_wait, sleep=sleep)
+            else:
+                _poll(caller, lambda: caller.post_json("/api/simulation/prepare/status", {"simulation_id": sim_id}),
+                      {"ready", "completed", "success"}, {"failed", "error"},
+                      stage="prepare", poll_seconds=poll_seconds, max_wait=max_wait, sleep=sleep)
 
         # 5) start
         _update(job_id, stage="simulate")

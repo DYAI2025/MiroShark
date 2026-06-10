@@ -3575,6 +3575,69 @@ def get_run_status_detail(simulation_id: str):
         }), 500
 
 
+@simulation_bp.route('/<simulation_id>/log', methods=['GET'])
+def get_simulation_log(simulation_id: str):
+    """
+    Get recent lines from simulation.log (the subprocess stdout/stderr).
+
+    Query parameters:
+        lines: Number of tail lines to return (default 50, max 500)
+
+    Returns:
+        {
+            "success": true,
+            "data": {
+                "simulation_id": "sim_xxxx",
+                "lines": 50,
+                "total_bytes": 12345,
+                "content": "..."
+            }
+        }
+    """
+    try:
+        num_lines = request.args.get('lines', 50, type=int)
+        num_lines = max(1, min(num_lines, 500))
+
+        sim_dir = os.path.join(
+            os.path.dirname(__file__),
+            '../../uploads/simulations',
+            simulation_id
+        )
+        log_path = os.path.join(sim_dir, "simulation.log")
+
+        if not os.path.exists(log_path):
+            return jsonify({
+                "success": True,
+                "data": {
+                    "simulation_id": simulation_id,
+                    "lines": 0,
+                    "total_bytes": 0,
+                    "content": ""
+                }
+            })
+
+        total_bytes = os.path.getsize(log_path)
+        content = SimulationRunner._read_log_tail(sim_dir, 3000)
+
+        return jsonify({
+            "success": True,
+            "data": {
+                "simulation_id": simulation_id,
+                "lines": len(content.splitlines()),
+                "total_bytes": total_bytes,
+                "content": content
+            }
+        })
+
+    except Exception as e:
+        logger.error(f"Failed to get simulation log: {str(e)}")
+        return jsonify({
+            "success": False,
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }), 500
+
+
 @simulation_bp.route('/<simulation_id>/actions', methods=['GET'])
 def get_simulation_actions(simulation_id: str):
     """

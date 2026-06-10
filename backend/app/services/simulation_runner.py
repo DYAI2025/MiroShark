@@ -41,6 +41,7 @@ class RunnerStatus(str, Enum):
     STOPPED = "stopped"
     COMPLETED = "completed"
     FAILED = "failed"
+    STUCK = "stuck"
 
 
 @dataclass
@@ -141,8 +142,13 @@ class SimulationRunState:
     updated_at: str = field(default_factory=lambda: datetime.now().isoformat())
     completed_at: Optional[str] = None
 
+    # Monitoring timestamps (for stuck detection)
+    last_action_at: Optional[str] = None
+    last_monitor_at: Optional[str] = None
+
     # Error info
     error: Optional[str] = None
+    error_context: Optional[str] = None  # last N chars from simulation.log on failure/stuck
 
     # Process ID (for stopping)
     process_pid: Optional[int] = None
@@ -191,7 +197,10 @@ class SimulationRunState:
             "started_at": self.started_at,
             "updated_at": self.updated_at,
             "completed_at": self.completed_at,
+            "last_action_at": self.last_action_at,
+            "last_monitor_at": self.last_monitor_at,
             "error": self.error,
+            "error_context": self.error_context,
             "process_pid": self.process_pid,
         }
     
@@ -569,6 +578,22 @@ class SimulationRunner:
         return state
     
     @classmethod
+    def _read_log_tail(cls, sim_dir: str, num_chars: int = 2000) -> str:
+        """Read last num_chars from simulation.log (best-effort)."""
+        main_log_path = os.path.join(sim_dir, "simulation.log")
+        try:
+            if os.path.exists(main_log_path):
+                with open(main_log_path, 'r', encoding='utf-8', errors='replace') as f:
+                    size = os.path.getsize(main_log_path)
+                    if size > num_chars:
+                        f.seek(size - num_chars)
+                        f.readline()  # skip partial first line
+                    return f.read()[-num_chars:]
+            return ""
+        except Exception:
+            return ""
+
+    @classmethod
     def _monitor_simulation(cls, simulation_id: str):
         """Monitor simulation process, parse action logs"""
         sim_dir = os.path.join(cls.RUN_STATE_DIR, simulation_id)
@@ -596,8 +621,22 @@ class SimulationRunner:
         if os.path.exists(polymarket_actions_log):
             polymarket_position = os.path.getsize(polymarket_actions_log)
 
+        # Stuck detection config (local llama3.2: ~12-17 min per round for 64 agents)
+        PROGRESS_TIMEOUT_SECONDS = 1200  # 20 min without progress = stuck
+        ROUND_DEADLINE_SECONDS = 2400    # 40 min per round max
+        STUCK_CHECK_INTERVAL = 30       # check stuck condition every 30s (not every 2s)
+
+        last_progress_time = time.time()
+        round_start_time = time.time()
+        last_stuck_check_time = time.time()
+        prev_total_actions = 0
+        prev_round = 0
+        iteration_count = 0
+
         try:
             while process.poll() is None:  # Process still running
+                iteration_count += 1
+
                 # Read Twitter action logs
                 if os.path.exists(twitter_actions_log):
                     twitter_position = cls._read_action_log(
@@ -615,6 +654,64 @@ class SimulationRunner:
                     polymarket_position = cls._read_action_log(
                         polymarket_actions_log, polymarket_position, state, "polymarket"
                     )
+
+                now = time.time()
+                state.last_monitor_at = datetime.now().isoformat()
+
+                # Track progress: did actions or round advance?
+                total_actions_now = state.twitter_actions_count + state.reddit_actions_count + state.polymarket_actions_count
+                if total_actions_now > prev_total_actions or state.current_round > prev_round:
+                    last_progress_time = now
+                    state.last_action_at = state.last_monitor_at
+                    prev_total_actions = total_actions_now
+                    prev_round = state.current_round
+
+                # Stuck check (every STUCK_CHECK_INTERVAL seconds, not every 2s)
+                if now - last_stuck_check_time >= STUCK_CHECK_INTERVAL:
+                    last_stuck_check_time = now
+
+                    # Progress timeout: no new actions/rounds for PROGRESS_TIMEOUT_SECONDS
+                    if now - last_progress_time >= PROGRESS_TIMEOUT_SECONDS:
+                        log_tail = cls._read_log_tail(sim_dir, 3000)
+                        msg = (
+                            f"No progress for {PROGRESS_TIMEOUT_SECONDS // 60} minutes "
+                            f"(last action: {state.last_action_at or 'never'}, "
+                            f"round {state.current_round}, "
+                            f"{total_actions_now} total actions). "
+                            f"Process still alive (PID {process.pid})."
+                        )
+                        logger.error(f"Simulation stuck (progress timeout): {simulation_id} - {msg}")
+                        logger.error(f"Simulation log tail:\n{log_tail}")
+                        state.runner_status = RunnerStatus.STUCK
+                        state.error = msg
+                        state.error_context = log_tail
+                        cls._save_run_state(state)
+                        cls._terminate_process(process, simulation_id, timeout=5)
+                        break
+
+                    # Round deadline: current round taking too long
+                    if state.current_round > 0:
+                        round_elapsed = now - round_start_time
+                        if round_elapsed >= ROUND_DEADLINE_SECONDS:
+                            log_tail = cls._read_log_tail(sim_dir, 3000)
+                            msg = (
+                                f"Round {state.current_round} exceeded deadline of "
+                                f"{ROUND_DEADLINE_SECONDS // 60} minutes "
+                                f"({round_elapsed / 60:.0f}m elapsed). "
+                                f"{total_actions_now} total actions."
+                            )
+                            logger.error(f"Simulation stuck (round deadline): {simulation_id} - {msg}")
+                            logger.error(f"Simulation log tail:\n{log_tail}")
+                            state.runner_status = RunnerStatus.STUCK
+                            state.error = msg
+                            state.error_context = log_tail
+                            cls._save_run_state(state)
+                            cls._terminate_process(process, simulation_id, timeout=5)
+                            break
+
+                # Reset round timer when round advances
+                if state.current_round > prev_round:
+                    round_start_time = now
 
                 # Update status
                 cls._save_run_state(state)
@@ -720,16 +817,8 @@ class SimulationRunner:
                     logger.warning(f"Telegram notify dispatch failed: {_tn_err}")
             else:
                 state.runner_status = RunnerStatus.FAILED
-                # Read error info from main log file
-                main_log_path = os.path.join(sim_dir, "simulation.log")
-                error_info = ""
-                try:
-                    if os.path.exists(main_log_path):
-                        with open(main_log_path, 'r', encoding='utf-8') as f:
-                            error_info = f.read()[-2000:]  # Take last 2000 characters
-                except Exception:
-                    pass
-                state.error = f"Process exit code: {exit_code}, error: {error_info}"
+                state.error_context = cls._read_log_tail(sim_dir, 2000)
+                state.error = f"Process exit code: {exit_code}, error: {state.error_context}"
                 logger.error(f"Simulation failed: {simulation_id}, error={state.error}")
 
                 # Fire outbound webhook for the failure path too — operators

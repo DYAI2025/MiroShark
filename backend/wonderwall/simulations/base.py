@@ -20,7 +20,9 @@ stays generic and delegates simulation-specific logic to these classes.
 from __future__ import annotations
 
 import asyncio
+import functools
 import inspect
+import json
 import logging
 import os
 import sqlite3
@@ -35,6 +37,98 @@ from wonderwall.clock.clock import Clock
 from wonderwall.social_platform.channel import Channel
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# LLM parameter tolerance — smaller models often generate wrong arg names.
+# ---------------------------------------------------------------------------
+
+_PARAM_ALIASES = {
+    'content': ['content', 'text', 'message', 'body', 'post_content', 'tweet'],
+    'query': ['query', 'search', 'q', 'keyword', 'keywords', 'search_query'],
+    'post_id': ['post_id', 'postid', 'id', 'post', 'tweet_id', 'reply_id'],
+    'comment_id': ['comment_id', 'commentid', 'cid'],
+    'user_name': ['user_name', 'username', 'name', 'handle', 'screen_name'],
+    'amount_usd': ['amount_usd', 'amount', 'usd', 'price', 'cost', 'value', 'money'],
+    'market_id': ['market_id', 'marketid', 'mid', 'market'],
+    'outcome': ['outcome', 'side', 'bet', 'position', 'choice'],
+    'num_shares': ['num_shares', 'shares', 'quantity', 'qty', 'amount_shares'],
+    'product_name': ['product_name', 'product', 'item', 'name'],
+    'purchase_num': ['purchase_num', 'num', 'count', 'quantity', 'number'],
+    'report_reason': ['report_reason', 'reason', 'cause', 'flag'],
+    'quote_content': ['quote_content', 'quote', 'comment', 'content'],
+    'group_name': ['group_name', 'name', 'group', 'title'],
+    'group_id': ['group_id', 'groupid', 'gid'],
+    'followee_id': ['followee_id', 'followee', 'user_id', 'target_id', 'uid'],
+    'mutee_id': ['mutee_id', 'mutee', 'user_id', 'target_id'],
+    'prompt': ['prompt', 'question', 'text', 'message'],
+    'bio': ['bio', 'biography', 'description', 'about'],
+    'question': ['question', 'query', 'topic', 'title'],
+    'outcome_a': ['outcome_a', 'outcomeA', 'yes_label', 'option_a'],
+    'outcome_b': ['outcome_b', 'outcomeB', 'no_label', 'option_b'],
+    'initial_probability': ['initial_probability', 'probability', 'prob', 'starting_price'],
+}
+
+
+def tolerant_tool(func):
+    """Decorator that makes an async tool function tolerate wrong param names.
+
+    Smaller LLMs (llama3.2, etc.) often generate incorrect parameter names
+    during function calling. This wrapper maps aliases back to the correct
+    names and handles nested-JSON-in-string values (another common bug).
+    Functions with zero parameters silently ignore any extra kwargs
+    (e.g. LLM passes ``amount_usd`` to ``do_nothing``).
+    """
+    sig = inspect.signature(func)
+    all_params = list(sig.parameters.keys())
+    correct_params = [p for p in all_params if p not in ('self', 'args', 'kwargs')]
+    is_noarg = len(correct_params) == 0
+
+    @functools.wraps(func)
+    async def wrapper(*args, **kwargs):
+        if is_noarg:
+            return await func(*args)
+        mapped = {}
+        for cp in correct_params:
+            if cp in kwargs:
+                mapped[cp] = kwargs[cp]
+                continue
+            aliases = _PARAM_ALIASES.get(cp, [])
+            for alias in aliases:
+                if alias in kwargs:
+                    mapped[cp] = kwargs[alias]
+                    logger.debug(
+                        'Mapped %s.%s(%s=…) → %s=…',
+                        func.__qualname__, func.__name__, alias, cp,
+                    )
+                    break
+        if mapped:
+            return await func(*args, **mapped)
+        for key, val in kwargs.items():
+            if isinstance(val, str) and len(val) > 10:
+                try:
+                    nested = json.loads(val)
+                    if isinstance(nested, dict):
+                        for cp in correct_params:
+                            if cp in nested:
+                                mapped[cp] = nested[cp]
+                                logger.debug(
+                                    'Extracted %s.%s from nested JSON',
+                                    func.__qualname__, func.__name__,
+                                )
+                                return await func(*args, **mapped)
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            if not mapped and correct_params:
+                logger.debug(
+                    'Fallback %s.%s: using first kwarg for %s',
+                    func.__qualname__, func.__name__, correct_params[0],
+                )
+                mapped[correct_params[0]] = val
+                return await func(*args, **mapped)
+        return await func(*args, **kwargs)
+
+    return wrapper
 
 
 # ---------------------------------------------------------------------------
@@ -319,7 +413,7 @@ class BaseAction(ABC):
                 continue
             method = getattr(self, name)
             if asyncio.iscoroutinefunction(method):
-                tools.append(FunctionTool(method))
+                tools.append(FunctionTool(tolerant_tool(method)))
         return tools
 
 

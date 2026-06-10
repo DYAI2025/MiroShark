@@ -186,6 +186,12 @@
       >{{ qualityData.health }}</span>
     </div>
 
+    <!-- Backend Status Indicator + Stuck Warning -->
+    <div class="monitoring-bar">
+      <span class="backend-dot" :class="{ alive: backendAlive, dead: !backendAlive }" :title="backendAlive ? 'Backend connected' : 'Backend unreachable'"></span>
+      <span v-if="stuckWarning" class="stuck-warning">⚠ {{ stuckWarning }}</span>
+    </div>
+
     <!-- Quality Diagnostics Panel (expandable) -->
     <div v-if="showQualityPanel && qualityData" class="quality-panel">
       <div class="qp-header">
@@ -783,6 +789,8 @@ const startError = ref(null)
 const runStatus = ref({})
 const allActions = ref([]) // All actions (incremental accumulation)
 const actionIds = ref(new Set()) // Action ID set for deduplication
+const backendAlive = ref(true)
+const stuckWarning = ref('')
 const scrollContainer = ref(null)
 const showScrollBtn = ref(false)
 const copied = ref(false)
@@ -1247,18 +1255,30 @@ const stopPolling = () => {
 // Track previous round for each platform, for detecting changes and logging
 const prevTwitterRound = ref(0)
 const prevRedditRound = ref(0)
+const lastProgressRound = ref(0)
+const lastProgressTime = ref(Date.now())
 
 const fetchRunStatus = async () => {
   if (!props.simulationId) return
   
   try {
     const res = await getRunStatus(props.simulationId)
+    backendAlive.value = true
     
     if (res.success && res.data) {
       const data = res.data
       
       runStatus.value = data
       
+      // Detect stuck state from backend
+      if (data.runner_status === 'stuck') {
+        stuckWarning.value = data.error || tr('Simulation is stuck — no progress detected', '模拟卡住 — 未检测到进展')
+        if (data.error_context) {
+          addLog(tr(`⚠ STUCK: ${data.error}`, `⚠ 卡住: ${data.error}`))
+        }
+        return
+      }
+
       // Detect round changes for each platform and output logs
       if (data.twitter_current_round > prevTwitterRound.value) {
         addLog(tr(`[Plaza] R${data.twitter_current_round}/${data.total_rounds} | T:${data.twitter_simulated_hours || 0}h | A:${data.twitter_actions_count}`, `[广场] R${data.twitter_current_round}/${data.total_rounds} | T:${data.twitter_simulated_hours || 0}h | A:${data.twitter_actions_count}`))
@@ -1268,6 +1288,26 @@ const fetchRunStatus = async () => {
       if (data.reddit_current_round > prevRedditRound.value) {
         addLog(tr(`[Community] R${data.reddit_current_round}/${data.total_rounds} | T:${data.reddit_simulated_hours || 0}h | A:${data.reddit_actions_count}`, `[社区] R${data.reddit_current_round}/${data.total_rounds} | T:${data.reddit_simulated_hours || 0}h | A:${data.reddit_actions_count}`))
         prevRedditRound.value = data.reddit_current_round
+      }
+      
+      // Frontend-side staleness detection: warn if no round progress for 5+ minutes
+      if (data.runner_status === 'running') {
+        const currentRound = data.current_round || 0
+        if (currentRound > lastProgressRound.value) {
+          lastProgressRound.value = currentRound
+          lastProgressTime.value = Date.now()
+          stuckWarning.value = ''
+        } else {
+          const elapsed = (Date.now() - lastProgressTime.value) / 1000 / 60
+          if (elapsed >= 5) {
+            stuckWarning.value = tr(
+              `No round progress for ${Math.floor(elapsed)} minutes — simulation may be stuck`,
+              `${Math.floor(elapsed)} 分钟无轮次进展 — 模拟可能已卡住`
+            )
+          }
+        }
+      } else {
+        stuckWarning.value = ''
       }
       
       // Check if simulation is complete (via runner_status or platform completion status)
@@ -1288,6 +1328,8 @@ const fetchRunStatus = async () => {
       }
     }
   } catch (err) {
+    backendAlive.value = false
+    stuckWarning.value = tr('Backend unreachable — check if server is running', '后端无法访问 — 请检查服务器是否在运行')
     console.warn('Failed to get run status:', err)
   }
 }
@@ -1697,6 +1739,50 @@ onUnmounted(() => {
 
 .events-slash {
   color: rgba(10,10,10,0.15);
+}
+
+/* Monitoring bar — backend status dot + stuck warning */
+.monitoring-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 4px 12px;
+  font-size: 11px;
+  background: rgba(10,10,10,0.02);
+  border-bottom: 1px solid rgba(10,10,10,0.06);
+}
+
+.backend-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #e74c3c;
+  flex-shrink: 0;
+}
+.backend-dot.alive {
+  background: #2ecc71;
+}
+.backend-dot.dead {
+  background: #e74c3c;
+  animation: pulse-red 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse-red {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+.stuck-warning {
+  color: #e67e22;
+  font-weight: 600;
+  animation: pulse-orange 2s ease-in-out infinite;
+}
+
+@keyframes pulse-orange {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
 }
 
 /* Quality chip in events bar */

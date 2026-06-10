@@ -837,7 +837,7 @@ Do NOT overclaim — this is scenario exploration, not prophecy
 1. [Must Call Tools to Investigate the Simulation World]
    - You are analyzing the simulation from a "God's eye view"
    - All claims must be grounded in Agent behavior from the simulation
-   - Each section must call tools at least 3 times (max 6) to gather evidence
+    - Each section must call tools at least 1 time (max 3) to gather evidence
    - Pick the right tool for the question at hand:
      • browse_clusters — zoom out first if you need orientation over the graph
      • simulation_feed — for direct quotes of agent posts/comments/trades
@@ -1114,20 +1114,27 @@ class ReportAgent:
     3. Reflection phase: Check content completeness and accuracy
     """
 
-    # Maximum tool calls per section
-    MAX_TOOL_CALLS_PER_SECTION = 6
+    # Maximum tool calls per section (env: REPORT_AGENT_MAX_TOOL_CALLS)
+    MAX_TOOL_CALLS_PER_SECTION = int(os.environ.get('REPORT_AGENT_MAX_TOOL_CALLS', '3'))
 
-    # Maximum reflection rounds
+    # Maximum reflection rounds (env: REPORT_AGENT_MAX_REFLECTION_ROUNDS)
     # Reduced from 3 to 1: each extra reflection round added ~30% latency + cost
     # with marginal quality gain. Set to 0 to disable reflection entirely.
-    MAX_REFLECTION_ROUNDS = 1
+    MAX_REFLECTION_ROUNDS = int(os.environ.get('REPORT_AGENT_MAX_REFLECTION_ROUNDS', '1'))
 
     # Maximum tool calls per chat
-    MAX_TOOL_CALLS_PER_CHAT = 2
+    MAX_TOOL_CALLS_PER_CHAT = int(os.environ.get('REPORT_AGENT_TOOL_CALLS_PER_CHAT', '2'))
 
     # Max parallel section workers. Claude/Gemini/GPT APIs comfortably handle
     # 5-8 parallel requests per key. OpenRouter's rate limit is well above this.
-    MAX_PARALLEL_SECTIONS = 6
+    # Reduced default for local slow models (env: REPORT_AGENT_MAX_PARALLEL_SECTIONS)
+    MAX_PARALLEL_SECTIONS = int(os.environ.get('REPORT_AGENT_MAX_PARALLEL_SECTIONS', '6'))
+    
+    # ReACT iteration limit per section (env: REPORT_AGENT_MAX_ITERATIONS)
+    MAX_ITERATIONS = int(os.environ.get('REPORT_AGENT_MAX_ITERATIONS', '5'))
+
+    # Minimum tool calls required before accepting Final Answer (env: REPORT_AGENT_MIN_TOOL_CALLS)
+    MIN_TOOL_CALLS = int(os.environ.get('REPORT_AGENT_MIN_TOOL_CALLS', '1'))
     
     def __init__(
         self, 
@@ -2198,8 +2205,8 @@ class ReportAgent:
         
         # ReACT loop
         tool_calls_count = 0
-        max_iterations = 8  # Maximum iteration rounds
-        min_tool_calls = 2  # Minimum tool call count
+        max_iterations = self.MAX_ITERATIONS  # env: REPORT_AGENT_MAX_ITERATIONS
+        min_tool_calls = self.MIN_TOOL_CALLS  # env: REPORT_AGENT_MIN_TOOL_CALLS
         conflict_retries = 0  # Consecutive conflict count when tool call and Final Answer appear simultaneously
         used_tools = set()  # Track names of tools already called
         all_tools = {"insight_forge", "panorama_search", "quick_search", "interview_agents", "browse_clusters"}
