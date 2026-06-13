@@ -97,7 +97,7 @@ def create_app(config_class=Config):
         
         # If internal key is set, enforce authentication
         if internal_key:
-            provided_key = request.headers.get('x-miroshark-internal-key')
+            provided_key = request.headers.get('x-miroshark-internal-key') or request.args.get('api_key')
             if not provided_key or provided_key != internal_key:
                 logger.warning(f"Unauthorized API access attempt: {request.method} {request.path}")
                 return {'error': 'Unauthorized - Invalid or missing internal key'}, 401

@@ -419,7 +419,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import {
   getPublicSimulations,
@@ -792,6 +792,9 @@ const forkAndOpen = async (item) => {
 }
 
 onMounted(refresh)
+onUnmounted(() => {
+  if (_searchDebounceTimer) clearTimeout(_searchDebounceTimer)
+})
 </script>
 
 <style scoped>

@@ -184,7 +184,7 @@ const resolutionClass = computed(() => {
 
 const chartAriaLabel = computed(() => {
   if (!hasBelief.value) return tr('No belief trajectory', '无信念轨迹')
-  return `${tr('Belief drift across', '信念漂移历经')} ${summary.value.belief.rounds.length} ${tr('rounds', '轮次')}`
+  return `${tr('Belief drift across', '信念漂移历经')} ${(summary.value.belief?.rounds?.length || 0)} ${tr('rounds', '轮次')}`
 })
 
 // Stacked area chart paths — stack order bullish (top), neutral (middle), bearish (bottom).
@@ -192,10 +192,10 @@ const chartAriaLabel = computed(() => {
 const stackPaths = computed(() => {
   if (!hasBelief.value) return { bullish: '', neutral: '', bearish: '' }
 
-  const rounds = summary.value.belief.rounds
-  const bu = summary.value.belief.bullish
-  const ne = summary.value.belief.neutral
-  const be = summary.value.belief.bearish
+  const rounds = summary.value.belief?.rounds || []
+  const bu = summary.value.belief?.bullish || []
+  const ne = summary.value.belief?.neutral || []
+  const be = summary.value.belief?.bearish || []
 
   const n = rounds.length
   const xStep = n > 1 ? CHART_W / (n - 1) : CHART_W

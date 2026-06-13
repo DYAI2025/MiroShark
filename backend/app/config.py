@@ -294,5 +294,12 @@ class Config:
             errors.append("NEO4J_URI is not configured")
         if not cls.NEO4J_PASSWORD:
             errors.append("NEO4J_PASSWORD is not configured")
+        # Warn about hardcoded development defaults
+        import logging
+        _log = logging.getLogger('miroshark.config')
+        if cls.SECRET_KEY == 'miroshark-secret-key':
+            _log.warning("SECRET_KEY is using the hardcoded default 'miroshark-secret-key'. Set SECRET_KEY in .env for production.")
+        if cls.NEO4J_PASSWORD == 'miroshark':
+            _log.warning("NEO4J_PASSWORD is using the hardcoded default. Set a strong password in .env for production.")
         return errors
 

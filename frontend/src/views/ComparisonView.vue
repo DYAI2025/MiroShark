@@ -281,8 +281,8 @@ const chartPad = 20
 onMounted(async () => {
   try {
     const res = await listSimulations()
-    if (res.data?.success) {
-      simulations.value = res.data.data?.simulations || []
+    if (res?.success) {
+      simulations.value = res.data?.simulations || []
     }
   } catch (_) {}
 
@@ -314,10 +314,10 @@ const runComparison = async () => {
   data.value = null
   try {
     const res = await compareSimulations(selectedId1.value, selectedId2.value)
-    if (res.data?.success) {
-      data.value = res.data.data
+    if (res?.success) {
+      data.value = res.data
     } else {
-      error.value = res.data?.error || tr('Comparison failed', '对比失败')
+      error.value = res?.error || tr('Comparison failed', '对比失败')
     }
   } catch (err) {
     error.value = err?.response?.data?.error || err.message || tr('Comparison failed', '对比失败')

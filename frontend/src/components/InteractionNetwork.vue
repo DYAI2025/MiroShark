@@ -316,7 +316,7 @@ const availablePlatforms = computed(() => {
   if (!hasData.value) return []
   const ps = new Set()
   for (const n of networkData.value.nodes) {
-    for (const p of n.platforms) ps.add(p)
+    for (const p of (n.platforms || [])) ps.add(p)
   }
   return [...ps].sort()
 })

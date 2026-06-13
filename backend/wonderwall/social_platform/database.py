@@ -129,6 +129,8 @@ def create_db(
 
     except sqlite3.Error as e:
         print(f"An error occurred while creating tables: {e}")
+        conn.close()
+        raise
 
     return conn, cursor
 
@@ -151,13 +153,13 @@ def print_db_tables_summary():
         print(f"Table: {table_name}")
 
         # Retrieve the table schema
-        cursor.execute(f"PRAGMA table_info({table_name})")
+        cursor.execute(f"PRAGMA table_info(`{table_name}`)")
         columns = cursor.fetchall()
         column_names = [column[1] for column in columns]
         print("- Columns:", column_names)
 
         # Retrieve and print foreign key information
-        cursor.execute(f"PRAGMA foreign_key_list({table_name})")
+        cursor.execute(f"PRAGMA foreign_key_list(`{table_name}`)")
         foreign_keys = cursor.fetchall()
         if foreign_keys:
             print("- Foreign Keys:")
@@ -168,7 +170,7 @@ def print_db_tables_summary():
             print("  No foreign keys.")
 
         # Print the first few rows of the table
-        cursor.execute(f"SELECT * FROM {table_name} LIMIT 5;")
+        cursor.execute(f"SELECT * FROM `{table_name}` LIMIT 5;")
         rows = cursor.fetchall()
         for row in rows:
             print(row)
@@ -180,6 +182,8 @@ def print_db_tables_summary():
 
 def fetch_table_from_db(cursor: sqlite3.Cursor,
                         table_name: str) -> List[Dict[str, Any]]:
+    if table_name not in TABLE_NAMES:
+        raise ValueError(f"Unknown table: {table_name}")
     cursor.execute(f"SELECT * FROM {table_name}")
     columns = [description[0] for description in cursor.description]
     data_dicts = [dict(zip(columns, row)) for row in cursor.fetchall()]

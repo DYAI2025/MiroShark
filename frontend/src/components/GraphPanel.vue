@@ -157,7 +157,7 @@
                       </div>
                       <div class="action-detail-row" v-else-if="action.action_args?.usd_received != null && action.action_args?.shares">
                         <span class="action-detail-label">{{ $tr('Price', '价格') }}</span>
-                        <span class="action-detail-value">${{ (action.action_args.usd_received / action.action_args.shares).toFixed(4) }}</span>
+                        <span class="action-detail-value">${{ action.action_args.shares ? (action.action_args.usd_received / action.action_args.shares).toFixed(4) : '0' }}</span>
                       </div>
                       <div class="action-detail-row" v-if="action.action_args?.usd_received != null">
                         <span class="action-detail-label">{{ $tr('Received', '已收到') }}</span>

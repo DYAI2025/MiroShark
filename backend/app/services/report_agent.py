@@ -1907,6 +1907,7 @@ class ReportAgent:
 
         lines = ["=== Polymarket Final State ==="]
 
+        conn = None
         try:
             conn = sqlite3.connect(db_path)
             conn.row_factory = sqlite3.Row
@@ -1967,10 +1968,11 @@ class ReportAgent:
                     f"Positions: ${pos_value:.0f} | Total: ${total_val:.0f} | "
                     f"P&L: {'+'if pnl>=0 else ''}{pnl:.0f}"
                 )
-
-            conn.close()
         except Exception as e:
             lines.append(f"Error reading market data: {e}")
+        finally:
+            if conn:
+                conn.close()
 
         return "\n".join(lines)
 

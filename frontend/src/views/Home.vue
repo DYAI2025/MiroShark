@@ -685,6 +685,8 @@ const startSimulation = () => {
       name: 'Process',
       params: { projectId: 'new' }
     })
+  }).catch(err => {
+    console.error('Failed to load pendingUpload store:', err)
   })
 }
 

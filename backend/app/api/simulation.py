@@ -8,6 +8,7 @@ import io
 import csv
 import hmac
 import json
+import threading
 import traceback
 from datetime import datetime, timezone
 from functools import wraps
@@ -244,6 +245,9 @@ def _client_ip() -> str:
     )
 
 
+_RATE_LIMIT_LOCK = threading.Lock()
+_LRU_LOCK = threading.Lock()
+
 def _sliding_window_rate_limited(
     hits: "dict[str, list[float]]",
     client_ip: str,
@@ -260,43 +264,46 @@ def _sliding_window_rate_limited(
     import time
     now = time.monotonic()
     cutoff = now - window_sec
-    bucket = [t for t in hits.get(client_ip, []) if t > cutoff]
-    if len(bucket) >= max_calls:
+    with _RATE_LIMIT_LOCK:
+        bucket = [t for t in hits.get(client_ip, []) if t > cutoff]
+        if len(bucket) >= max_calls:
+            hits[client_ip] = bucket
+            return True
+        bucket.append(now)
         hits[client_ip] = bucket
-        return True
-    bucket.append(now)
-    hits[client_ip] = bucket
-    if len(hits) > 1024:
-        for ip in list(hits.keys()):
-            if not hits[ip] or hits[ip][-1] < cutoff:
-                hits.pop(ip, None)
+        if len(hits) > 1024:
+            for ip in list(hits.keys()):
+                if not hits[ip] or hits[ip][-1] < cutoff:
+                    hits.pop(ip, None)
     return False
 
 
 def _lru_get(cache: dict, order: list, key: str):
     """LRU read: returns the entry (or None) and promotes it to most-recent."""
-    entry = cache.get(key)
-    if entry is None:
-        return None
-    try:
-        order.remove(key)
-    except ValueError:
-        pass
-    order.append(key)
+    with _LRU_LOCK:
+        entry = cache.get(key)
+        if entry is None:
+            return None
+        try:
+            order.remove(key)
+        except ValueError:
+            pass
+        order.append(key)
     return entry
 
 
 def _lru_put(cache: dict, order: list, key: str, value, *, max_size: int) -> None:
     """LRU write with bounded size; evicts least-recent entries when full."""
-    if key in cache:
-        try:
-            order.remove(key)
-        except ValueError:
-            pass
-    cache[key] = value
-    order.append(key)
-    while len(order) > max_size:
-        cache.pop(order.pop(0), None)
+    with _LRU_LOCK:
+        if key in cache:
+            try:
+                order.remove(key)
+            except ValueError:
+                pass
+        cache[key] = value
+        order.append(key)
+        while len(order) > max_size:
+            cache.pop(order.pop(0), None)
 
 
 # ============== Scenario Auto-Suggest ==============
