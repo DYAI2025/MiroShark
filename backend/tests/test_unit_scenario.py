@@ -148,10 +148,11 @@ def test_pipeline_missing_project_id_fails_at_ontology():
 # --------------------------------------------------------------------------
 @pytest.fixture
 def client(monkeypatch):
-    monkeypatch.setenv("MIROSHARK_INTERNAL_KEY", "")  # relax auth for the contract tests
+    monkeypatch.setenv("MIROSHARK_INTERNAL_KEY", "test-key")  # auth guard needs a non-empty key
     monkeypatch.setattr(sc.threading, "Thread", _NoopThread)
     app = create_app()
     app.config["TESTING"] = True
+    app.config["DEBUG"] = True
     with app.test_client() as c:
         yield c
 
@@ -164,35 +165,38 @@ class _NoopThread:
         pass
 
 
+HEADERS = {"x-miroshark-internal-key": "test-key"}
+
+
 def test_post_requires_seed(client):
-    r = client.post("/api/scenario", json={})
+    r = client.post("/api/scenario", json={}, headers=HEADERS)
     assert r.status_code == 400
     assert "seed" in r.get_json()["error"].lower()
 
 
 def test_post_rejects_short_seed(client):
-    r = client.post("/api/scenario", json={"seed": "too short"})
+    r = client.post("/api/scenario", json={"seed": "too short"}, headers=HEADERS)
     assert r.status_code == 400
 
 
 def test_post_rejects_bad_max_rounds(client):
-    r = client.post("/api/scenario", json={"seed": "x" * 80, "max_rounds": 9999})
+    r = client.post("/api/scenario", json={"seed": "x" * 80, "max_rounds": 9999}, headers=HEADERS)
     assert r.status_code == 400
 
 
 def test_post_accepts_valid_seed_returns_job(client):
-    r = client.post("/api/scenario", json={"seed": "x" * 80, "max_rounds": 3})
+    r = client.post("/api/scenario", json={"seed": "x" * 80, "max_rounds": 3}, headers=HEADERS)
     assert r.status_code == 202
     body = r.get_json()
     assert body["success"] is True
     assert body["data"]["status"] == "running"
     job_id = body["data"]["job_id"]
     # GET reflects the created job
-    g = client.get(f"/api/scenario/{job_id}")
+    g = client.get(f"/api/scenario/{job_id}", headers=HEADERS)
     assert g.status_code == 200
     assert g.get_json()["data"]["job_id"] == job_id
 
 
 def test_get_unknown_job_404(client):
-    r = client.get("/api/scenario/does-not-exist")
+    r = client.get("/api/scenario/does-not-exist", headers=HEADERS)
     assert r.status_code == 404

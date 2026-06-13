@@ -142,6 +142,8 @@ _UNDOCUMENTED_ALLOWLIST: set[str] = {
     "/api/report/check/<simulation_id>",
     "/api/report/tools/search",
     "/api/report/tools/statistics",
+    # Debug log viewer — subprocess stdout/stderr tail, internal tooling only.
+    "/api/simulation/<simulation_id>/log",
 }
 
 
