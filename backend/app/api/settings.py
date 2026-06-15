@@ -1,11 +1,15 @@
 """
 Settings API — runtime LLM configuration management.
 
-GET  /api/settings        — return current active config (masked)
-POST /api/settings        — update config at runtime (no restart required)
-POST /api/settings/test-llm — make a minimal test call and return latency
+GET    /api/settings              — return current active config (masked)
+POST   /api/settings              — update config at runtime (no restart required)
+POST   /api/settings/test-llm     — make a minimal test call and return latency
+POST   /api/settings/presets      — save current config as a named preset
+DELETE /api/settings/presets/<id> — delete a user-saved preset
 """
 
+import json
+import os
 import time
 from flask import request, jsonify
 
@@ -21,6 +25,8 @@ from ..utils.logger import get_logger
 
 logger = get_logger('miroshark.api.settings')
 
+_CUSTOM_PRESETS_PATH = os.path.join(os.path.dirname(__file__), '..', 'custom_presets.json')
+
 
 def _mask_key(key: str) -> str:
     """Return only the last 4 characters of an API key."""
@@ -29,10 +35,26 @@ def _mask_key(key: str) -> str:
     return '****' + key[-4:] if len(key) > 4 else '****'
 
 
-# Preset blueprints mirror the .env.example Cloud / Local blocks.
+def _load_custom_presets() -> dict:
+    """Load user-saved presets from the JSON file on disk."""
+    try:
+        with open(_CUSTOM_PRESETS_PATH) as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+def _save_custom_presets(presets: dict) -> None:
+    """Write user-saved presets to the JSON file on disk."""
+    with open(_CUSTOM_PRESETS_PATH, 'w') as f:
+        json.dump(presets, f, indent=2)
+        f.write('\n')
+
+
+# Built-in preset blueprints mirror the .env.example Cloud / Local blocks.
 # The `key_slots` list names the fields the preset's API key should be
 # copied into when the caller supplies `preset_api_key`.
-_PRESETS = {
+_BUILTIN_PRESETS = {
     'cheap': {
         'label': 'Cloud — ~$1/run (Mimo V2 Flash + Gemini 3 Flash)',
         'fields': {
@@ -57,19 +79,53 @@ _PRESETS = {
         'label': 'Local — Ollama (free, self-hosted)',
         'fields': {
             'LLM_PROVIDER': 'openai',
-            'LLM_BASE_URL': 'http://localhost:11434/v1',
-            'LLM_MODEL_NAME': 'qwen2.5:32b',
+            'LLM_BASE_URL': 'http://localhost:11435/v1',
+            'LLM_MODEL_NAME': 'qwen2.5:7b',
             'LLM_API_KEY': 'ollama',
-            'SMART_PROVIDER': '',
-            'SMART_BASE_URL': '',
-            'SMART_MODEL_NAME': '',
-            'SMART_API_KEY': '',
-            'NER_BASE_URL': '',
-            'NER_MODEL_NAME': '',
-            'NER_API_KEY': '',
-            'WONDERWALL_MODEL_NAME': '',
+            'SMART_PROVIDER': 'openai',
+            'SMART_BASE_URL': 'http://localhost:11435/v1',
+            'SMART_MODEL_NAME': 'qwen2.5:7b',
+            'SMART_API_KEY': 'ollama',
+            'NER_BASE_URL': 'http://localhost:11435/v1',
+            'NER_MODEL_NAME': 'qwen2.5:7b',
+            'NER_API_KEY': 'ollama',
+            'WONDERWALL_MODEL_NAME': 'qwen2.5:7b',
+            'WONDERWALL_BASE_URL': 'http://localhost:11435/v1',
+            'WONDERWALL_API_KEY': 'ollama',
+            'WONDERWALL_FALLBACK_MODEL_NAME': 'qwen2.5:7b',
+            'WONDERWALL_FALLBACK_BASE_URL': 'http://localhost:11435/v1',
+            'WONDERWALL_FALLBACK_API_KEY': 'ollama',
             'EMBEDDING_PROVIDER': 'ollama',
-            'EMBEDDING_BASE_URL': 'http://localhost:11434',
+            'EMBEDDING_BASE_URL': 'http://localhost:11435',
+            'EMBEDDING_MODEL': 'nomic-embed-text',
+            'EMBEDDING_API_KEY': '',
+            'EMBEDDING_DIMENSIONS': 768,
+            'WEB_SEARCH_MODEL': '',
+        },
+        'key_slots': [],
+    },
+    'local_preset': {
+        'label': 'Local — GPU-Ollama (RTX 3070 Ti, qwen2.5:7b)',
+        'fields': {
+            'LLM_PROVIDER': 'openai',
+            'LLM_BASE_URL': 'http://localhost:11435/v1',
+            'LLM_MODEL_NAME': 'qwen2.5:7b',
+            'LLM_API_KEY': 'ollama',
+            'SMART_PROVIDER': 'openai',
+            'SMART_BASE_URL': 'http://localhost:11435/v1',
+            'SMART_MODEL_NAME': 'qwen2.5:7b',
+            'SMART_API_KEY': 'ollama',
+            'NER_BASE_URL': 'http://localhost:11435/v1',
+            'NER_MODEL_NAME': 'qwen2.5:7b',
+            'NER_API_KEY': 'ollama',
+            'WONDERWALL_MODEL_NAME': 'qwen2.5:7b',
+            'WONDERWALL_BASE_URL': 'http://localhost:11435/v1',
+            'WONDERWALL_API_KEY': 'ollama',
+            'WONDERWALL_FALLBACK_MODEL_NAME': 'qwen2.5:7b',
+            'WONDERWALL_FALLBACK_BASE_URL': 'http://localhost:11435/v1',
+            'WONDERWALL_FALLBACK_API_KEY': 'ollama',
+            'EMBEDDING_PROVIDER': 'ollama',
+            'EMBEDDING_BASE_URL': 'http://localhost:11435',
             'EMBEDDING_MODEL': 'nomic-embed-text',
             'EMBEDDING_API_KEY': '',
             'EMBEDDING_DIMENSIONS': 768,
@@ -78,6 +134,13 @@ _PRESETS = {
         'key_slots': [],
     },
 }
+
+
+def _all_presets() -> dict:
+    """Merge built-in presets with user-saved custom presets."""
+    presets = dict(_BUILTIN_PRESETS)
+    presets.update(_load_custom_presets())
+    return presets
 
 
 def _current_snapshot() -> dict:
@@ -136,7 +199,7 @@ def _current_snapshot() -> dict:
             },
         },
         'available_presets': [
-            {'id': k, 'label': v['label']} for k, v in _PRESETS.items()
+            {'id': k, 'label': v['label']} for k, v in _all_presets().items()
         ],
     }
 
@@ -149,7 +212,8 @@ def get_settings():
 
 def _apply_preset(preset_id: str, preset_api_key: str) -> None:
     """Mutate Config in-place to match the named preset."""
-    preset = _PRESETS[preset_id]
+    presets = _all_presets()
+    preset = presets[preset_id]
     for attr, value in preset['fields'].items():
         setattr(Config, attr, value)
     if preset_api_key:
@@ -177,10 +241,11 @@ def update_settings():
 
     preset_id = body.get('preset')
     if preset_id:
-        if preset_id not in _PRESETS:
+        presets = _all_presets()
+        if preset_id not in presets:
             return jsonify({
                 'success': False,
-                'error': f"Unknown preset '{preset_id}'. Valid: {list(_PRESETS)}"
+                'error': f"Unknown preset '{preset_id}'. Valid: {list(presets)}"
             }), 400
         _apply_preset(preset_id, body.get('preset_api_key', ''))
 
@@ -302,6 +367,65 @@ def test_llm():
             'success': False,
             'error': str(e),
         }), 200  # Return 200 so the frontend can read the error body
+
+
+@settings_bp.route('/presets', methods=['POST'])
+def save_preset():
+    """
+    Save current config as a named custom preset.
+
+    Body:
+        { "id": "my_custom_preset", "label": "My Custom Setup", ...fields }
+
+    Fields are optional — missing fields will be filled from current Config.
+    """
+    body = request.get_json(silent=True) or {}
+    preset_id = body.get('id', '').strip()
+    if not preset_id:
+        return jsonify({'success': False, 'error': 'Preset id is required'}), 400
+    if not preset_id.replace('_', '').replace('-', '').isalnum():
+        return jsonify({'success': False, 'error': 'Preset id may only contain letters, numbers, underscores, and hyphens'}), 400
+    if preset_id in _BUILTIN_PRESETS:
+        return jsonify({'success': False, 'error': f"'{preset_id}' is a built-in preset and cannot be overwritten"}), 400
+
+    label = body.get('label', preset_id)
+
+    fields = {}
+    for attr in list(_BUILTIN_PRESETS['local']['fields']):
+        if attr in body:
+            fields[attr] = body[attr]
+        elif hasattr(Config, attr):
+            fields[attr] = getattr(Config, attr)
+
+    key_slots = body.get('key_slots', [])
+
+    presets = _load_custom_presets()
+    presets[preset_id] = {
+        'label': label,
+        'fields': fields,
+        'key_slots': key_slots,
+    }
+    _save_custom_presets(presets)
+
+    logger.info("Custom preset saved: id=%s label=%s", preset_id, label)
+    return jsonify({'success': True, 'data': _current_snapshot()})
+
+
+@settings_bp.route('/presets/<preset_id>', methods=['DELETE'])
+def delete_preset(preset_id: str):
+    """Delete a user-saved custom preset."""
+    if preset_id in _BUILTIN_PRESETS:
+        return jsonify({'success': False, 'error': f"'{preset_id}' is a built-in preset and cannot be deleted"}), 400
+
+    presets = _load_custom_presets()
+    if preset_id not in presets:
+        return jsonify({'success': False, 'error': f"Custom preset '{preset_id}' not found"}), 404
+
+    del presets[preset_id]
+    _save_custom_presets(presets)
+
+    logger.info("Custom preset deleted: id=%s", preset_id)
+    return jsonify({'success': True, 'data': _current_snapshot()})
 
 
 @settings_bp.route('/test-webhook', methods=['POST'])

@@ -144,6 +144,9 @@ _UNDOCUMENTED_ALLOWLIST: set[str] = {
     "/api/report/tools/statistics",
     # Debug log viewer — subprocess stdout/stderr tail, internal tooling only.
     "/api/simulation/<simulation_id>/log",
+    # Custom preset save/delete — operator-facing, no stable API contract yet.
+    "/api/settings/presets",
+    "/api/settings/presets/<preset_id>",
 }
 
 

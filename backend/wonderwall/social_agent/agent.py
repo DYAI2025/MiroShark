@@ -71,7 +71,7 @@ def _get_fallback_model():
             model_platform=ModelPlatformType.OPENAI,
             model_type=fb_model,
             api_key=fb_api_key or None,
-            base_url=fb_base_url or None,
+            url=fb_base_url or None,
             default_headers={
                 'HTTP-Referer': 'https://github.com/aaronjmars/MiroShark',
                 'X-OpenRouter-Title': 'MiroShark - Universal Swarm Intelligence Engine',

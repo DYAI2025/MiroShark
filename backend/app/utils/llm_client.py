@@ -130,7 +130,7 @@ class LLMClient:
         api_key: Optional[str] = None,
         base_url: Optional[str] = None,
         model: Optional[str] = None,
-        timeout: float = 300.0
+        timeout: float = 1800.0
     ):
         self.api_key = api_key or Config.LLM_API_KEY
         self.base_url = base_url or Config.LLM_BASE_URL
@@ -151,12 +151,10 @@ class LLMClient:
             },
         )
 
-        # Ollama context window size — prevents prompt truncation.
-        self._num_ctx = int(os.environ.get('OLLAMA_NUM_CTX', '8192'))
-
-    def _is_ollama(self) -> bool:
-        """Check if we're talking to an Ollama server."""
-        return '11434' in (self.base_url or '')
+        # Context window size — sent with every request.
+        # Ollama respects `num_ctx` via extra_body.options; other providers
+        # silently ignore unknown keys → safe to always send.
+        self._num_ctx = int(os.environ.get('MODEL_NUM_CTX', os.environ.get('OLLAMA_NUM_CTX', '8192')))
 
     def _supports_anthropic_prompt_cache(self) -> bool:
         """Return True when the configured model is Claude-family and cache flag is on.
@@ -168,8 +166,6 @@ class LLMClient:
             return False
         m = (self.model or "").lower()
         if not m:
-            return False
-        if self._is_ollama():
             return False
         return ("claude" in m) or ("anthropic" in m)
 
@@ -280,11 +276,11 @@ class LLMClient:
         if response_format:
             kwargs["response_format"] = response_format
 
-        # For Ollama: pass num_ctx via extra_body to prevent prompt truncation
-        if self._is_ollama() and self._num_ctx:
-            kwargs["extra_body"] = {
-                "options": {"num_ctx": self._num_ctx}
-            }
+        # Always send num_ctx context window — Ollama respects it, other
+        # providers silently ignore unknown extra_body keys → safe to send.
+        extra_body = {}
+        if self._num_ctx:
+            extra_body.setdefault("options", {})["num_ctx"] = self._num_ctx
 
         # OpenRouter → Langfuse Broadcast pass-through.
         # Spec: https://openrouter.ai/docs/guides/features/broadcast/langfuse
@@ -293,7 +289,7 @@ class LLMClient:
         # the `metadata`, `tags`, `name` fields we used to set) is dropped
         # at the broadcast boundary. Any extra keys nested under `trace`
         # become Langfuse trace metadata and are filterable in the UI.
-        if not self._is_ollama() and 'openrouter' in (self.base_url or ''):
+        if 'openrouter' in (self.base_url or ''):
             caller = 'unknown'
             for frame_info in inspect.stack()[1:5]:
                 mod = frame_info.filename
@@ -341,21 +337,22 @@ class LLMClient:
             }
             trace_block = {k: v for k, v in trace_block.items() if v not in ("", None)}
 
-            extra = kwargs.get("extra_body", {})
-            extra["trace"] = trace_block
+            extra_body["trace"] = trace_block
             # `user` → Langfuse userId (per-tenant analytics).
             # `session_id` → Langfuse sessionId (groups conversational calls).
             # Both keys are documented in the broadcast spec.
             if sim_id:
-                extra["user"] = sim_id
-                extra["session_id"] = sim_id
+                extra_body["user"] = sim_id
+                extra_body["session_id"] = sim_id
             # Disable chain-of-thought on reasoning-capable models by default —
             # we want short, deterministic outputs, not a 100-token <think>
             # trace padding every call. Saves 50-80% latency on Qwen3/Gemini-3-Flash
             # in benchmarks; no-ops on models that don't support the flag.
             if Config.LLM_DISABLE_REASONING:
-                extra["reasoning"] = {"enabled": False}
-            kwargs["extra_body"] = extra
+                extra_body["reasoning"] = {"enabled": False}
+
+        if extra_body:
+            kwargs["extra_body"] = extra_body
 
         t0 = time.perf_counter()
         try:
