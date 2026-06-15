@@ -27,6 +27,19 @@ from camel.prompts import TextPrompt
 from camel.toolkits import FunctionTool
 from camel.types import OpenAIBackendRole
 
+# Defense-in-depth: callers often pass `base_url` (OpenAI kwarg) instead of
+# `url` (ModelFactory kwarg). Patch ModelFactory.create to accept both.
+import camel.models.model_factory as _mf
+_orig_create = _mf.ModelFactory.create
+def _patched_create(*args, **kwargs):
+    if 'base_url' in kwargs:
+        if kwargs.get('url') is None:
+            kwargs['url'] = kwargs.pop('base_url')
+        else:
+            kwargs.pop('base_url')
+    return _orig_create(*args, **kwargs)
+_mf.ModelFactory.create = staticmethod(_patched_create)
+
 from wonderwall.social_agent.agent_action import SocialAction
 from wonderwall.social_agent.agent_environment import SocialEnvironment
 from wonderwall.social_platform import Channel
