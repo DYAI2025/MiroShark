@@ -23,7 +23,7 @@ from transformers import AutoModel, AutoTokenizer
 @torch.no_grad()
 def process_batch(model: AutoModel, tokenizer: AutoTokenizer,
                   batch_texts: List[str]):
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cpu")
     inputs = tokenizer(batch_texts,
                        return_tensors="pt",
                        padding=True,

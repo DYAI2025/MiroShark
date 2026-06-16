@@ -82,7 +82,7 @@ def get_twhin_model(device):
 
 def load_model(model_name):
     try:
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        device = torch.device("cpu")
         if model_name == 'paraphrase-MiniLM-L6-v2':
             return SentenceTransformer(model_name,
                                        device=device,
@@ -112,8 +112,8 @@ def get_recsys_model(recsys_type: str = None):
         raise ValueError(f"Unknown recsys type: {recsys_type}")
 
 
-# Move model to GPU if available
-device = 'cuda' if torch.cuda.is_available() else 'cpu'
+# BERT model runs on CPU to avoid VRAM contention with Ollama GPU
+device = 'cpu'
 if model is not None:
     model.to(device)
 else:
