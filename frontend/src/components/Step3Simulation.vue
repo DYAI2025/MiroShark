@@ -189,6 +189,10 @@
     <!-- Backend Status Indicator + Stuck Warning -->
     <div class="monitoring-bar">
       <span class="backend-dot" :class="{ alive: backendAlive, dead: !backendAlive }" :title="backendAlive ? 'Backend connected' : 'Backend unreachable'"></span>
+      <label class="monitor-toggle" :title="$tr('Auto-remediate stuck simulations (polls every 8 min)', '自动修复卡住的模拟（每8分钟轮询）')">
+        <input type="checkbox" v-model="autoMonitorEnabled" @change="toggleAutoMonitor" />
+        <span class="monitor-label">{{ $tr('Auto Monitor', '自动监控') }}</span>
+      </label>
       <span v-if="stuckWarning" class="stuck-warning">⚠ {{ stuckWarning }}</span>
     </div>
 
@@ -751,6 +755,9 @@ import {
   injectDirectorEvent,
   getDirectorEvents,
   getSimulationQuality,
+  startMonitor,
+  stopMonitor,
+  getMonitorStatus,
 } from '../api/simulation'
 import { generateReport } from '../api/report'
 import { renderMarkdown } from '../utils/markdown'
@@ -811,6 +818,7 @@ let flashedEventTimer = null
 // object exposes no template_id, so we best-effort resolve via the parent
 // project on mount. Populated in fetchPresetBranches() below.
 const presetCounterfactualBranches = ref([])
+const autoMonitorEnabled = ref(false)
 
 // Article drawer state
 const showArticleDrawer = ref(false)
@@ -1068,6 +1076,33 @@ const polymarketElapsedTime = computed(() => {
 // Methods
 const addLog = (msg) => {
   emit('add-log', msg)
+}
+
+const toggleAutoMonitor = async () => {
+  if (!props.simulationId) return
+  if (autoMonitorEnabled.value) {
+    addLog(tr('Starting autoactive monitoring...', '启动自动监控…'))
+    try {
+      const res = await startMonitor({ simulation_id: props.simulationId })
+      if (res?.success !== false) {
+        addLog(tr('Autoactive monitoring active (polls every 8 min)', '自动监控已激活（每8分钟轮询）'))
+      } else {
+        autoMonitorEnabled.value = false
+        addLog(tr(`Monitor start failed: ${res?.error || 'unknown'}`, `监控启动失败：${res?.error || '未知'}`))
+      }
+    } catch (err) {
+      autoMonitorEnabled.value = false
+      addLog(tr(`Monitor start error: ${err.message}`, `监控启动错误：${err.message}`))
+    }
+  } else {
+    addLog(tr('Stopping autoactive monitoring...', '停止自动监控…'))
+    try {
+      await stopMonitor(props.simulationId)
+      addLog(tr('Autoactive monitoring stopped', '自动监控已停止'))
+    } catch (err) {
+      addLog(tr(`Monitor stop error: ${err.message}`, `监控停止错误：${err.message}`))
+    }
+  }
 }
 
 // Reset all state (for restarting simulation)
@@ -1783,6 +1818,28 @@ onUnmounted(() => {
 @keyframes pulse-orange {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.5; }
+}
+
+.monitor-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 12px;
+  cursor: pointer;
+  font-size: 12px;
+  user-select: none;
+}
+.monitor-toggle input[type="checkbox"] {
+  cursor: pointer;
+  accent-color: #3b82f6;
+}
+.monitor-label {
+  color: var(--text-secondary, #9ca3af);
+  transition: color 0.2s;
+}
+.monitor-toggle input:checked + .monitor-label {
+  color: #3b82f6;
+  font-weight: 600;
 }
 
 /* Quality chip in events bar */

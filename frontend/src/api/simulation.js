@@ -129,6 +129,30 @@ export const getRunStatusDetail = (simulationId) => {
 }
 
 /**
+ * Start autoactive monitoring for a simulation
+ * @param {Object} data - { simulation_id }
+ */
+export const startMonitor = (data) => {
+  return requestWithRetry(() => service.post('/api/simulation/monitor', data), 3, 1000)
+}
+
+/**
+ * Stop autoactive monitoring
+ * @param {string} simulationId
+ */
+export const stopMonitor = (simulationId) => {
+  return service.post(`/api/simulation/${simulationId}/monitor/stop`)
+}
+
+/**
+ * Get autoactive monitoring status
+ * @param {string} simulationId
+ */
+export const getMonitorStatus = (simulationId) => {
+  return service.get(`/api/simulation/${simulationId}/monitor/status`)
+}
+
+/**
  * Compare two simulations side by side
  * @param {string} id1 - First simulation ID
  * @param {string} id2 - Second simulation ID
