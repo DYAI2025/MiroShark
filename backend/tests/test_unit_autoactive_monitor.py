@@ -46,23 +46,27 @@ class TestAutoactiveMonitorService:
 
     @patch("app.services.autoactive_monitor.AutoactiveMonitorService._ollama_is_alive")
     @patch("app.services.autoactive_monitor.AutoactiveMonitorService._vram_used_mib")
-    def test_no_intervention_when_healthy(self, mock_vram, mock_ollama):
-        """Healthy sim with progress should have stuck_count = 0."""
+    @patch("app.services.autoactive_monitor.AutoactiveMonitorService._find_sim_pid")
+    def test_healthy_sim_no_remediation(self, mock_pid, mock_vram, mock_ollama):
+        """Healthy sim: Ollama alive, VRAM ok, sim running — remediation should be no-op."""
         mock_ollama.return_value = True
         mock_vram.return_value = 5000
-        # Simulate a running monitor with progress
-        state = {
-            "status": MonitorStatus.RUNNING.value,
-            "last_progress": "round_5|150_actions",
-            "stuck_count": 0,
-        }
-        assert state["stuck_count"] == 0
+        mock_pid.return_value = 99999
+        result = AutoactiveMonitorService._execute_remediation("sim_healthy", object())
+        actions = result.get("actions", [])
+        assert "ollama_restart" not in actions, "Should not restart Ollama when it's alive"
 
+    @patch("app.services.autoactive_monitor.AutoactiveMonitorService._re_trigger_start")
+    @patch("app.services.autoactive_monitor.AutoactiveMonitorService._find_sim_pid")
+    @patch("app.services.autoactive_monitor.AutoactiveMonitorService._vram_used_mib")
     @patch("app.services.autoactive_monitor.AutoactiveMonitorService._restart_ollama")
     @patch("app.services.autoactive_monitor.AutoactiveMonitorService._ollama_is_alive")
-    def test_intervention_triggers_when_ollama_dead(self, mock_alive, mock_restart):
+    def test_intervention_triggers_when_ollama_dead(self, mock_alive, mock_restart, mock_vram, mock_pid, mock_trigger):
         """Dead Ollama triggers restart intervention."""
         mock_alive.return_value = False
         mock_restart.return_value = True
+        mock_vram.return_value = 5000
+        mock_pid.return_value = 99999
+        mock_trigger.return_value = None
         intervention = AutoactiveMonitorService._execute_remediation("sim_test", {})
         assert "ollama_restart" in intervention.get("actions", [])
