@@ -677,6 +677,55 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/SuccessEnvelope" }
 
+  /api/simulation/{simulation_id}/monitor:
+    post:
+      tags: [Automation]
+      summary: Start autoactive monitoring (polls every 8 min, auto-remediates stuck sims).
+      parameters:
+        - $ref: "#/components/parameters/SimulationIdPath"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                simulation_id:
+                  type: string
+                  description: Override simulation ID (optional, falls back to path).
+      responses:
+        "200":
+          description: Monitor started.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SuccessEnvelope" }
+
+  /api/simulation/{simulation_id}/monitor/stop:
+    post:
+      tags: [Automation]
+      summary: Stop autoactive monitoring.
+      parameters:
+        - $ref: "#/components/parameters/SimulationIdPath"
+      responses:
+        "200":
+          description: Monitor stopped.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SuccessEnvelope" }
+
+  /api/simulation/{simulation_id}/monitor/status:
+    get:
+      tags: [Automation]
+      summary: Get monitoring status (running/stopped/idle + intervention count).
+      parameters:
+        - $ref: "#/components/parameters/SimulationIdPath"
+      responses:
+        "200":
+          description: Monitor status.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SuccessEnvelope" }
+
   /api/simulation/{simulation_id}/run-status:
     get:
       tags: [Live State]
