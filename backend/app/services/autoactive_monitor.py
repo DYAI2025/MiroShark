@@ -12,6 +12,7 @@ Usage:
     status = AutoactiveMonitorService.status("sim_xxxxx")
 """
 
+import logging
 import os
 import time
 import subprocess
@@ -26,11 +27,14 @@ except ImportError:
     SimulationRunner = None
     RunnerStatus = None
 
+logger = logging.getLogger("miroshark.autoactive_monitor")
 
 POLL_INTERVAL_SECONDS = int(os.environ.get("MONITOR_POLL_INTERVAL", "480"))
 STUCK_THRESHOLD = int(os.environ.get("MONITOR_STUCK_THRESHOLD", "3"))
 OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "127.0.0.1:11435")
 VRAM_CRITICAL_MIB = int(os.environ.get("MONITOR_VRAM_CRITICAL", "7500"))
+OLLAMA_BIN = os.environ.get("OLLAMA_BIN", "/tmp/ollama-upstream/bin/ollama")
+MIROSHARK_API_URL = os.environ.get("MIROSHARK_API_URL", "http://127.0.0.1:5001")
 
 
 class MonitorStatus(str, Enum):
@@ -102,29 +106,36 @@ class AutoactiveMonitorService:
     @classmethod
     def _monitor_loop(cls, simulation_id: str):
         while True:
-            with cls._lock:
-                state = cls._states.get(simulation_id)
-                if not state or state["status"] != MonitorStatus.RUNNING.value:
+            try:
+                with cls._lock:
+                    state = cls._states.get(simulation_id)
+                    if not state or state["status"] != MonitorStatus.RUNNING.value:
+                        break
+
+                run_state = cls._get_run_state(simulation_id)
+                if run_state:
+                    cls._check_progress(simulation_id, run_state)
+
+                with cls._lock:
+                    state = cls._states.get(simulation_id)
+                    if state and state["stuck_count"] >= STUCK_THRESHOLD:
+                        cls._execute_remediation(simulation_id, run_state or {})
+                        state["stuck_count"] = 0
+
+                if run_state and cls._is_completed(run_state):
+                    with cls._lock:
+                        s = cls._states.get(simulation_id)
+                        if s:
+                            s["status"] = MonitorStatus.STOPPED.value
                     break
 
-            run_state = cls._get_run_state(simulation_id)
-            if run_state:
-                cls._check_progress(simulation_id, run_state)
-
-            with cls._lock:
-                state = cls._states.get(simulation_id)
-                if state and state["stuck_count"] >= STUCK_THRESHOLD:
-                    cls._execute_remediation(simulation_id, run_state or {})
-                    state["stuck_count"] = 0
-
-            if run_state and cls._is_completed(run_state):
-                with cls._lock:
-                    s = cls._states.get(simulation_id)
-                    if s:
-                        s["status"] = MonitorStatus.STOPPED.value
-                break
-
-            time.sleep(POLL_INTERVAL_SECONDS)
+                time.sleep(POLL_INTERVAL_SECONDS)
+            except Exception:
+                logger.exception(
+                    "[%s] Unhandled error in monitor loop, continuing",
+                    simulation_id,
+                )
+                time.sleep(POLL_INTERVAL_SECONDS)
 
     @classmethod
     def _check_progress(cls, simulation_id: str, run_state) -> None:
@@ -235,7 +246,7 @@ class AutoactiveMonitorService:
     def _restart_ollama(cls) -> bool:
         try:
             subprocess.run(
-                ["pkill", "-f", "/tmp/ollama-upstream/bin/ollama serve"],
+                ["pkill", "-f", f"{OLLAMA_BIN} serve"],
                 timeout=5,
             )
             time.sleep(2)
@@ -248,7 +259,7 @@ class AutoactiveMonitorService:
             env["OLLAMA_NUM_PARALLEL"] = "2"
             env["OLLAMA_HOST"] = OLLAMA_HOST
             subprocess.Popen(
-                ["/tmp/ollama-upstream/bin/ollama", "serve"],
+                [OLLAMA_BIN, "serve"],
                 env=env,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
@@ -256,6 +267,7 @@ class AutoactiveMonitorService:
             time.sleep(5)
             return True
         except Exception:
+            logger.exception("Failed to restart Ollama")
             return False
 
     @classmethod
@@ -268,6 +280,7 @@ class AutoactiveMonitorService:
             if result.returncode == 0 and result.stdout.strip():
                 return int(result.stdout.strip().split("\n")[0])
         except Exception:
+            logger.exception("[%s] Failed to find sim PID", simulation_id)
             return None
 
     @classmethod
@@ -277,7 +290,7 @@ class AutoactiveMonitorService:
             time.sleep(2)
             subprocess.run(["kill", "-9", str(pid)], timeout=5)
         except Exception:
-            pass
+            logger.exception("Failed to kill PID %s", pid)
 
     @classmethod
     def _re_trigger_start(cls, simulation_id: str) -> None:
@@ -291,14 +304,14 @@ class AutoactiveMonitorService:
                 "enable_cross_platform": True,
             }).encode()
             req = urllib.request.Request(
-                "http://127.0.0.1:5001/api/simulation/start",
+                f"{MIROSHARK_API_URL}/api/simulation/start",
                 data=data,
                 headers={"Content-Type": "application/json"},
                 method="POST",
             )
             urllib.request.urlopen(req, timeout=30)
         except Exception:
-            pass
+            logger.exception("[%s] Failed to re-trigger simulation start", simulation_id)
 
     # ---- Logging ------------------------------------------------------------
 
