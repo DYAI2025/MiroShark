@@ -3421,6 +3421,53 @@ def stop_simulation():
         }), 500
 
 
+# ============== Autoactive Monitor Endpoints ==============
+
+@simulation_bp.route('/<simulation_id>/monitor', methods=['POST'])
+def start_autoactive_monitor(simulation_id: str):
+    """Start autoactive monitoring for a simulation.
+
+    Request (JSON):
+        {"simulation_id": "sim_xxxx"}  # Optional, extracted from URL too
+
+    Returns:
+        {"success": true, "data": {monitor_state}}
+    """
+    try:
+        from ..services.autoactive_monitor import AutoactiveMonitorService
+        body = request.get_json(silent=True) or {}
+        sid = body.get("simulation_id", simulation_id)
+        result = AutoactiveMonitorService.start(sid)
+        return jsonify(result)
+    except Exception as e:
+        logger.error(f"Failed to start monitor: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@simulation_bp.route('/<simulation_id>/monitor/stop', methods=['POST'])
+def stop_autoactive_monitor(simulation_id: str):
+    """Stop autoactive monitoring."""
+    try:
+        from ..services.autoactive_monitor import AutoactiveMonitorService
+        result = AutoactiveMonitorService.stop(simulation_id)
+        return jsonify(result)
+    except Exception as e:
+        logger.error(f"Failed to stop monitor: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@simulation_bp.route('/<simulation_id>/monitor/status', methods=['GET'])
+def get_autoactive_monitor_status(simulation_id: str):
+    """Get autoactive monitoring status."""
+    try:
+        from ..services.autoactive_monitor import AutoactiveMonitorService
+        result = AutoactiveMonitorService.status(simulation_id)
+        return jsonify(result)
+    except Exception as e:
+        logger.error(f"Failed to get monitor status: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 # ============== Real-time Status Monitoring Endpoints ==============
 
 @simulation_bp.route('/<simulation_id>/run-status', methods=['GET'])
